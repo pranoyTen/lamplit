@@ -37,7 +37,7 @@ const grid = (books, pct = {}) => books.map(b => card(b, pct[b.id])).join('') ||
 const NAV = ['home', 'library', 'settings'];
 const sidebar = route => `<nav aria-label="Main"><div class="logo">Lectern</div>
 <div class="navlinks">${NAV.map(r => `<a href="#/${r}"${r === route ? ' aria-current="page"' : ''}>${svg(ICON[r])}${r[0].toUpperCase() + r.slice(1)}</a>`).join('')}</div>
-${state.libs?.length ? `<div class="col g8" style="padding:0 8px"><div class="label muted">LIBRARIES</div>${state.libs.map(l => `<button class="lnk" id="lib-${esc(l.id)}" data-act="lib" data-v="${esc(l.id)}" aria-pressed="${l.id === state.libId}">${esc(l.name)}</button>`).join('')}</div>` : ''}
+${state.libs?.length ? `<div class="col g8" style="padding:0 8px"><div class="label muted">Libraries</div>${state.libs.map(l => `<button class="lnk" id="lib-${esc(l.id)}" data-act="lib" data-v="${esc(l.id)}" aria-pressed="${l.id === state.libId}">${esc(l.name)}</button>`).join('')}</div>` : ''}
 <div class="navfoot"><button class="btn" id="theme" data-act="theme" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} theme">${svg(ICON.theme, 20)}Theme: ${state.theme === 'dark' ? 'Dark' : 'Light'}</button>
 <div class="cap muted">${state.session ? 'Signed in to ' + esc(state.session.server) : 'Not signed in'}</div></div></nav>`;
 
@@ -63,7 +63,7 @@ const setrow = (label, desc, id, ctl) => `<div class="setrow field"><div class="
 const settings = () => {
   const a = state.acct, s = state.session;
   const body = s
-    ? `<div class="setrow"><div class="row g16" style="flex:1 1 240px;flex-wrap:nowrap;align-items:center;justify-content:flex-start"><div class="avatar" aria-hidden="true">${esc(s.username[0]?.toUpperCase() ?? '?')}</div><div style="min-width:0"><div class="strong">Signed in as ${esc(s.username)}</div><div class="cap muted">${esc(s.server)}</div></div></div><div class="label accent">CONNECTED</div></div>
+    ? `<div class="setrow"><div class="row g16" style="flex:1 1 240px;flex-wrap:nowrap;align-items:center;justify-content:flex-start"><div class="avatar" aria-hidden="true">${esc(s.username[0]?.toUpperCase() ?? '?')}</div><div style="min-width:0"><div class="strong">Signed in as ${esc(s.username)}</div><div class="cap muted">${esc(s.server)}</div></div></div><div class="label accent">Connected</div></div>
 <div class="setrow"><div class="info"><div class="strong">Switch account or server</div></div><button class="btn" id="signout" data-act="signout">Sign out</button></div>`
     : `<form id="login">${setrow('Server address', 'Where your Audiobookshelf server is hosted, including http:// or https://.', 'server', `<input id="server" type="text" autocomplete="url" placeholder="https://library.example.com" value="${esc(a.address)}" data-f="address">`)}
 ${setrow('Username', 'The account set up in Audiobookshelf.', 'user', `<input id="user" type="text" autocomplete="username" placeholder="Username" value="${esc(a.username)}" data-f="username">`)}
