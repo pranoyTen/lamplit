@@ -31,19 +31,19 @@ const bar = pct => `<div class="bar thin"><i style="width:${Math.round(pct * 100
 
 const card = (b, pct) => `<div class="book"><div class="cover" aria-hidden="true" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(b.id))}" alt="" loading="lazy"></div>
 <div class="col" style="gap:2px"><div class="strong">${esc(b.title)}</div><div class="cap muted">${esc(b.author)}${b.duration ? ' · ' + len(b.duration) : ''}</div></div>${pct > 0 && pct < 1 ? bar(pct) : ''}</div>`;
-const grid = (books, pct = {}) => books.map(b => card(b, pct[b.id])).join('') || '<p class="muted">Nothing here yet.</p>';
+const grid = (books, pct = {}) => books.map(b => card(b, pct[b.id])).join('') || '<p class="muted">Nothing here yet</p>';
 
 // ---- views ----
 const NAV = ['home', 'library', 'settings'];
 const sidebar = route => `<nav aria-label="Main"><div class="logo">Lectern</div>
-<div class="navlinks">${NAV.map(r => `<a href="#/${r}"${r === route ? ' aria-current="page"' : ''}>${svg(ICON[r])}${r[0].toUpperCase() + r.slice(1)}</a>`).join('')}</div>
+<div class="navlinks">${NAV.map(r => `<a href="#/${r}"${r === route ? ' aria-current="page"' : ''}>${svg(ICON[r], 20)}${r[0].toUpperCase() + r.slice(1)}</a>`).join('')}</div>
 ${state.libs?.length ? `<div class="col g8" style="padding:0 8px"><div class="label muted">Libraries</div>${state.libs.map(l => `<button class="lnk" id="lib-${esc(l.id)}" data-act="lib" data-v="${esc(l.id)}" aria-pressed="${l.id === state.libId}">${esc(l.name)}</button>`).join('')}</div>` : ''}
 <div class="navfoot"><button class="btn" id="theme" data-act="theme" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} theme">${svg(ICON.theme, 20)}Theme: ${state.theme === 'dark' ? 'Dark' : 'Light'}</button>
 <div class="cap muted">${state.session ? 'Signed in to ' + esc(state.session.server) : 'Not signed in'}</div></div></nav>`;
 
 const views = {};
 views.home = async () => {
-  if (!state.libId) return '<h1>Home</h1><p class="muted">No libraries found on this server.</p>';
+  if (!state.libId) return '<h1>Home</h1><p class="muted">No libraries found on this server</p>';
   const api = client();
   const [cont, pct, recent] = await Promise.all([api.inProgress(), api.progress(), api.items(state.libId, { limit: 10, sort: 'addedAt', desc: 1 })]);
   return `<h1>Home</h1><section class="col g16"><h2>Continue listening</h2><div class="grid">${grid(cont, pct)}</div></section>
@@ -51,7 +51,7 @@ views.home = async () => {
 };
 
 views.library = async () => {
-  if (!state.libId) return '<h1>Library</h1><p class="muted">No libraries found on this server.</p>';
+  if (!state.libId) return '<h1>Library</h1><p class="muted">No libraries found on this server</p>';
   const { total, books } = await client().items(state.libId, { limit: 200, sort: 'media.metadata.title' });
   state.items = books;
   return `<div class="row"><div class="col g4"><h1>${esc(state.libs.find(l => l.id === state.libId)?.name ?? 'Library')}</h1><div class="muted">${total} books${total > books.length ? ` · showing the first ${books.length}` : ''}</div></div>
@@ -65,11 +65,11 @@ const settings = () => {
   const body = s
     ? `<div class="setrow"><div class="row g16" style="flex:1 1 240px;flex-wrap:nowrap;align-items:center;justify-content:flex-start"><div class="avatar" aria-hidden="true">${esc(s.username[0]?.toUpperCase() ?? '?')}</div><div style="min-width:0"><div class="strong">Signed in as ${esc(s.username)}</div><div class="cap muted">${esc(s.server)}</div></div></div><div class="label accent">Connected</div></div>
 <div class="setrow"><div class="info"><div class="strong">Switch account or server</div></div><button class="btn" id="signout" data-act="signout">Sign out</button></div>`
-    : `<form id="login">${setrow('Server address', 'Where your Audiobookshelf server is hosted, including http:// or https://.', 'server', `<input id="server" type="text" autocomplete="url" placeholder="https://library.example.com" value="${esc(a.address)}" data-f="address">`)}
-${setrow('Username', 'The account set up in Audiobookshelf.', 'user', `<input id="user" type="text" autocomplete="username" placeholder="Username" value="${esc(a.username)}" data-f="username">`)}
+    : `<form id="login">${setrow('Server address', 'Where your Audiobookshelf server is hosted, including http:// or https://', 'server', `<input id="server" type="text" autocomplete="url" placeholder="https://library.example.com" value="${esc(a.address)}" data-f="address">`)}
+${setrow('Username', 'The account set up in Audiobookshelf', 'user', `<input id="user" type="text" autocomplete="username" placeholder="Username" value="${esc(a.username)}" data-f="username">`)}
 ${setrow('Password', '', 'pass', `<div class="row g8" style="align-items:center"><input id="pass" type="${a.showPw ? 'text' : 'password'}" autocomplete="current-password" placeholder="Password" value="${esc(a.password)}" data-f="password"><button type="button" class="btn" id="showpw" data-act="showpw" aria-pressed="${a.showPw}">${a.showPw ? 'Hide' : 'Show'}</button></div>`)}
 ${a.error ? `<div role="alert" class="danger" style="padding:12px 0;border-top:1px solid var(--hairline)">${esc(a.error)}</div>` : ''}
-<div class="setrow" style="justify-content:flex-start"><button type="submit" class="btn primary" id="signin"${a.busy ? ' disabled' : ''}>${a.busy ? 'Signing in…' : 'Sign in'}</button><div class="cap muted">Use the same username and password as the Audiobookshelf web app.</div></div></form>`;
+<div class="setrow" style="justify-content:flex-start"><button type="submit" class="btn primary" id="signin"${a.busy ? ' disabled' : ''}>${a.busy ? 'Signing in…' : 'Sign in'}</button><div class="cap muted">Use the same username and password as the Audiobookshelf web app</div></div></form>`;
   return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section></div>`;
 };
 
