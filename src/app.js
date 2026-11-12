@@ -280,6 +280,7 @@ async function signIn() {
   try {
     state.session = await absClient(tfetch, { server: a.address }).login(a.username.trim(), a.password);
     store.set('session', state.session);
+    preloadLast();
     a.password = '';
     location.hash = '#/home';
   } catch (e) {
@@ -387,7 +388,9 @@ function paintPlayer() {
   const s = player.s, a = audio();
   if (!s || !a) return;
   const t = position(), c = chapterAt(s, t);
-  document.getElementById('np-seek').value = Math.floor(t);
+  const sk = document.getElementById('np-seek');
+  sk.value = Math.floor(t);
+  sk.style.setProperty('--p', (s.duration ? t / s.duration * 100 : 0) + '%');
   document.getElementById('np-time').textContent = `${clock(t)} / ${clock(s.duration)}`;
   document.querySelectorAll('#np-menu [data-ch]').forEach((b, i) => i === c ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current'));
   document.getElementById('np-toggle').innerHTML = svg(a.paused ? PL.play : PL.pause, 24);
@@ -395,7 +398,7 @@ function paintPlayer() {
   paintCovers();
 }
 
-async function startPlayer({ v: id, t: title, a: author }) {
+async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
   stopPlayer();
   player.id = id; paintCovers();
   const el = document.getElementById('player');
@@ -411,11 +414,11 @@ async function startPlayer({ v: id, t: title, a: author }) {
     s.author = author;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
-    el.innerHTML = `<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted" id="np-status">${esc(author)}</div></div>
+    el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book">
+<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-status">${esc(author)}</span> · <span id="np-time"></span></div></div>
 <div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<button class="ib txt" data-k="rate" id="np-rate" aria-label="Playback speed">${player.rate}×</button></div>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
-<div class="np-seek"><span class="cap muted" id="np-time"></span><input type="range" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book"></div>
-<audio id="audio" autoplay src="${esc(s.tracks[player.i].url)}"></audio>`;
+<audio id="audio"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
     const a = audio();
     a.defaultPlaybackRate = a.playbackRate = player.rate;
     a.addEventListener('loadedmetadata', () => { if (player.last === 0 && s.start) a.currentTime = Math.max(0, s.start - s.tracks[player.i].start); }, { once: true });
@@ -442,17 +445,25 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       const ch = e.target.closest('[data-ch]');
       if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(false); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();
     };
-    el.querySelector('#np-seek').oninput = e => { document.getElementById('np-time').textContent = `${clock(e.target.value)} / ${clock(s.duration)}`; };
+    el.querySelector('#np-seek').oninput = e => { e.target.style.setProperty('--p', (s.duration ? e.target.value / s.duration * 100 : 0) + '%'); document.getElementById('np-time').textContent = `${clock(e.target.value)} / ${clock(s.duration)}`; };
     el.querySelector('#np-seek').onchange = e => seek(+e.target.value);
     document.onclick = e => { if (!e.target.closest('.chap')) toggleMenu(false); };
     el.onkeydown = e => { if (e.key === 'Escape') { toggleMenu(false); document.getElementById('np-chapbtn')?.focus(); } };
     paintPlayer();
   } catch (e) {
+    if (!autoplay) return stopPlayer(); // a quiet preload that fails just leaves the player hidden
     player.id = null; paintCovers();
     status(e.status === 401 ? 'Your session expired. Sign in again.' : e.status ? `The server answered ${e.status}.` : "Can't start playback. Check your connection.");
   }
 }
 window.addEventListener('beforeunload', () => syncPlayer());
+// the player is always there when there is something to resume: load the most recent Continue listening book, paused
+// shortcut: this opens a server session without listening to anything yet; harmless, but it shows in the server's session list until closed
+async function preloadLast() {
+  if (!state.session || player.id) return;
+  const b = (await client().inProgress().catch(() => [])).find(x => !state.hidden.includes(x.libraryId));
+  if (b && !player.id) startPlayer({ v: b.id, t: b.title, a: b.author }, false);
+}
 
 const act = {
   // same book: toggle pause; another book: start it; ignored while the session is still opening
@@ -505,5 +516,6 @@ document.addEventListener('input', e => {
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
 window.addEventListener('hashchange', render);
 render();
+preloadLast();
 // a chosen folder must be re-allowed on every launch before anything reads or writes it
 if (dl) Promise.all([...new Set([state.dlcfg.dir, ...dl.list().filter(i => i.abs).map(i => i.root)])].filter(Boolean).map(path => T.core.invoke('allow_dir', { path }))).catch(() => {}).finally(() => state.session && dl.pump());
