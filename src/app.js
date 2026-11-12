@@ -534,6 +534,14 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
+// space toggles play/pause, unless the key belongs to what has focus (typing, or a button/link that space already activates)
+document.addEventListener('keydown', e => {
+  if (e.key !== ' ' || e.repeat || !player.s || !audio()) return;
+  const t = e.target;
+  if (t.isContentEditable || t.closest('textarea, select, button, a, input:not([type=range])')) return;
+  e.preventDefault();
+  ctl.toggle();
+});
 window.addEventListener('hashchange', render);
 render();
 preloadLast();
