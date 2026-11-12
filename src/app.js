@@ -493,7 +493,7 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
     el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book">
 <a class="ib" href="#/player" id="np-open" aria-label="Open player">${svg('<path d="m6 15 6-6 6 6"/>', 24)}</a>
-<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-chap"></span><span id="np-status">${esc(author)}</span> · <span id="np-time"></span></div></div>
+<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-chap"></span><span id="np-time"></span><span id="np-status"></span></div></div>
 <div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
 <div class="vol"><button class="ib" data-k="mute" id="np-mute"></button><input type="range" id="np-vol" min="0" max="1" step="0.05" aria-label="Volume"></div>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
@@ -518,7 +518,7 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     a.addEventListener('error', () => {
       console.warn('audio error', a.error?.code, a.error?.message);
       // MediaError codes: 2 network, 3 decode, 4 source not supported
-      status(a.error?.code === 2 ? "Can't read the file. Check your connection" : s.local ? 'This download looks damaged. Remove it in Downloads and download it again' : "Can't decode this file");
+      status(' · ' + (a.error?.code === 2 ? "Can't read the file. Check your connection" : s.local ? 'This download looks damaged. Remove it in Downloads and download it again' : "Can't decode this file"));
     });
     el.onclick = e => {
       const ch = e.target.closest('[data-ch]');
