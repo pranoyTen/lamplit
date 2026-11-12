@@ -12,6 +12,7 @@ const state = {
   libs: null,
   libId: store.get('lib', null),
   dlcfg: store.get('dlcfg', { limitGB: 10, dir: null }), // download cap in GB and chosen folder (null = app data)
+  statsRange: 'year', stats: null,
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
   items: [], q: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
@@ -26,6 +27,7 @@ const ICON = {
   library: '<path d="M4 19.5V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2.5zM4 19.5A2 2 0 0 0 6 21h13"/>',
   settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
   series: '<path d="M5 5h11a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2zM9 3h10a2 2 0 0 1 2 2v12"/>',
+  stats: '<path d="M5 20V10M12 20V4M19 20v-7"/>',
   downloads: '<path d="M12 3v12m0 0-4-4m4 4 4-4M4 20h16"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   theme: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>'
@@ -39,7 +41,7 @@ const card = (b, pct, extra = '') => `<div class="book"><button class="${coverCl
 const grid = (books, pct = {}, extra = dlExtra) => books.map(b => card(b, pct[b.id], extra(b))).join('') || '<p class="muted">Nothing here yet</p>';
 
 // ---- views ----
-const NAV = ['home', 'library', 'series', 'downloads', 'settings'];
+const NAV = ['home', 'library', 'series', 'downloads', 'stats', 'settings'];
 const sidebar = route => `<nav aria-label="Main"><div class="logo">Lectern</div>
 <div class="navlinks">${NAV.map(r => `<a href="#/${r}"${r === route ? ' aria-current="page"' : ''}>${svg(ICON[r], 20)}${r[0].toUpperCase() + r.slice(1)}</a>`).join('')}</div>
 ${shown().length ? `<div class="col g8" style="padding:0 8px"><div class="label muted">Libraries</div>${shown().map(l => `<button class="lnk" id="lib-${esc(l.id)}" data-act="lib" data-v="${esc(l.id)}" aria-pressed="${l.id === state.libId}">${esc(l.name)}</button>`).join('')}</div>` : ''}
@@ -196,6 +198,38 @@ ${!dl ? '' : !it ? `<button class="btn" data-act="dl" ${meta}>Download</button>`
 <div class="col g8">${facts.map(([k, v]) => `<div class="row g12" style="justify-content:flex-start;flex-wrap:nowrap;align-items:baseline"><span class="muted" style="width:96px;flex:none">${k}</span><span>${esc(v)}</span></div>`).join('')}</div>
 ${text ? `<div style="white-space:pre-line">${esc(text)}</div>` : ''}
 </div></div>`;
+};
+
+// ---- stats: listening time, streak, authors and finished books (computed from the server's listening stats) ----
+const RANGES = { week: ['Week', 'Listening over the last 7 days'], month: ['Month', 'Listening so far this month'], year: ['Year', 'Listening so far in ' + new Date().getFullYear()] };
+const hrs = s => s >= 36000 ? Math.round(s / 3600) + 'h' : len(s);
+const shortDate = ms => new Date(ms).toLocaleDateString('en', { month: 'short', day: 'numeric', ...(new Date(ms).getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) });
+
+function statsHtml() {
+  const d = state.stats, r = state.statsRange, s = summarize(d, r);
+  const tile = (label, value) => `<div class="card tile"><div class="cap muted">${label}</div><div class="big">${value}</div></div>`;
+  const max = Math.max(...s.bars.map(b => b.secs), 1), few = s.bars.length <= 12;
+  const val = secs => r === 'year' ? Math.round(secs / 3600) + 'h' : Math.round(secs / 60) + 'm';
+  const top = s.authors[0]?.secs || 1;
+  return `<div class="row"><div class="col g4"><h1>Stats</h1><div class="muted">${RANGES[r][1]}</div></div>
+<div class="row g8" role="group" aria-label="Time range" style="flex-wrap:nowrap">${Object.entries(RANGES).map(([k, [name]]) => `<button class="seg" data-act="range" data-v="${k}" aria-pressed="${k === r}">${name}</button>`).join('')}</div></div>
+<section class="tiles" aria-label="Totals">${tile('Time listened', hrs(s.time))}${tile('Books finished', s.finishedCount)}${tile('Daily average', len(s.avg))}${tile('Current streak', s.streak + (s.streak === 1 ? ' day' : ' days'))}</section>
+<section class="card" style="padding:24px;display:flex;flex-direction:column;gap:16px"><h2>${r === 'year' ? 'Hours listened per month' : 'Minutes listened per day'}</h2>
+<figure class="chart" role="img" aria-label="Bar chart of time listened. ${s.bars.map(b => b.label + ' ' + val(b.secs)).join(', ')}" style="gap:${few ? 12 : 4}px">${s.bars.map((b, i) => `<div class="barcol" title="${esc(b.label)}: ${val(b.secs)}">${few ? `<div class="cap strong">${val(b.secs)}</div>` : ''}<div style="width:100%;height:${Math.max(b.secs ? 2 : 0, Math.round(b.secs / max * 196))}px;background:${i === s.bars.length - 1 ? 'var(--accent)' : 'var(--track)'};border-radius:4px 4px 0 0"></div></div>`).join('')}</figure>
+<div aria-hidden="true" class="chart-x" style="gap:${few ? 12 : 4}px">${s.bars.map(b => `<div class="cap muted">${esc(b.label)}</div>`).join('')}</div></section>
+<div class="row" style="align-items:flex-start;justify-content:flex-start;gap:24px">
+<section class="col g12" style="flex:1 1 360px;min-width:0"><h2>Most listened authors</h2>${s.authors.length ? `<ul class="plain col g12">${s.authors.map(a => `<li class="col g4"><div class="row" style="flex-wrap:nowrap"><span class="strong">${esc(a.name)}</span><span class="muted">${hrs(a.secs)}</span></div><div class="bar"><i style="width:${Math.round(a.secs / top * 100)}%"></i></div></li>`).join('')}</ul>` : '<p class="muted">No listening yet</p>'}</section>
+<section class="col g12" style="flex:1 1 360px;min-width:0"><h2>Recently finished</h2>${d.recent.length ? `<ul class="plain fin">${d.recent.map(f => `<li><div class="dcov" style="width:40px;height:40px;background:${tint(f.title)}"><img class="cover-img" src="${esc(client().coverUrl(f.id))}" alt="" loading="lazy"></div><a class="col btxt" href="#/book/${esc(f.id)}" style="flex:1;min-width:0"><span class="strong">${esc(f.title)}</span><span class="cap muted">${esc(f.author)}</span></a><span class="cap muted">${shortDate(f.at)}</span></li>`).join('')}</ul>` : '<p class="muted">No finished books yet</p>'}</section></div>`;
+}
+views.stats = async () => {
+  const api = client(), d = await api.stats();
+  const known = Object.fromEntries(d.items.map(i => [i.id, i]));
+  d.recent = (await Promise.all([...d.finished].sort((a, b) => b.at - a.at).slice(0, 5).map(async f => {
+    const k = known[f.id] ?? await api.details(f.id).then(x => ({ title: x.title, author: x.authors.join(', ') }), () => null);
+    return k && { id: f.id, at: f.at, title: k.title, author: k.author };
+  }))).filter(Boolean);
+  state.stats = d;
+  return `<div id="statspage" class="col" style="gap:32px">${statsHtml()}</div>`;
 };
 
 // ---- render ----
@@ -427,6 +461,7 @@ const act = {
   dlclean: () => { dl.removeFinished().then(paintDownloads); return true; },
   dlretry: d => { dl.retry(d.v); paintDownloads(); return true; },
   dlremove: d => { dl.remove(d.v).then(() => location.hash.startsWith('#/book/') ? render() : paintDownloads()); return true; },
+  range: d => { state.statsRange = d.v; document.getElementById('statspage').innerHTML = statsHtml(); return true; },
   rename: () => { state.renaming = !state.renaming; state.renameErr = ''; paintSerHead(); return true; }
 };
 document.addEventListener('click', e => {

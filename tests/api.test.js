@@ -54,3 +54,8 @@ test('details flatten the people, series and progress of one book', async () => 
   const d = await api.details('i1');
   assert.deepEqual([d.title, d.authors, d.narrators, d.series, d.chapters, d.progress], ['Dune', ['Frank Herbert'], ['S. Brick'], [{ id: 's1', name: 'Dune', sequence: '1' }], 2, 0.5]);
 });
+
+test('stats flatten per-book listening time and finished books', async () => {
+  const api = absClient(async url => reply(url.endsWith('/api/me') ? { mediaProgress: [{ libraryItemId: 'i1', isFinished: true, finishedAt: 5 }, { libraryItemId: 'i2', isFinished: false }] } : { days: { '2026-11-12': 60 }, items: { i1: { id: 'i1', timeListening: 90, mediaMetadata: { title: 'Emma', authors: [{ name: 'Jane Austen' }] } } } }), { server: 'https://x.example' });
+  assert.deepEqual(await api.stats(), { days: { '2026-11-12': 60 }, items: [{ id: 'i1', title: 'Emma', author: 'Jane Austen', secs: 90 }], finished: [{ id: 'i1', at: 5 }] });
+});
