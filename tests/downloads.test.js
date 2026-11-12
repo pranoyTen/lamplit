@@ -24,7 +24,8 @@ const setup = (fetchFn, { limit = 0, chunk = 4, sizes = [5, 3] } = {}) => {
       let pos = 0;
       return { seek: async n => { pos = n; }, write: async b => { for (const x of b) files[path][pos++] = x; }, close: async () => {} };
     },
-    remove: async p => { removed.push(p); }
+    remove: async p => { removed.push(p); },
+    stat: async p => { if (!files[p]) throw new Error('missing'); return { size: files[p].length }; }
   };
   const api = () => ({ item: async () => ({ duration: 20, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: sizes[0], duration: 10, start: 0 }, { url: 'u2', ext: '.mp3', size: sizes[1], duration: 10, start: 10 }] }) });
   const dl = makeDownloads({ fetchFn, fs, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit }), api, urlFor: async f => 'asset://' + f, load: () => null, save: () => {}, chunk });
@@ -99,4 +100,29 @@ test('a book that would pass the storage limit fails with a clear message', asyn
   await settled(dl);
   assert.equal(dl.get('b1').status, 'error');
   assert.match(dl.get('b1').error, /storage limit/);
+});
+
+test('a file-system failure is reported as such, not as a network problem', async () => {
+  const { fetchFn } = server(DATA);
+
+
+  const fs2 = { mkdir: async () => {}, open: async () => { return { seek: async () => { throw 'fs.seek not allowed'; }, write: async () => {}, close: async () => {} }; }, remove: async () => {}, stat: async () => ({ size: 1e9 }) };
+  const api = () => ({ item: async () => ({ duration: 10, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: 5, duration: 10, start: 0 }] }) });
+  const d = makeDownloads({ fetchFn, fs: fs2, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit: 0 }), api, urlFor: async f => f, load: () => null, save: () => {}, chunk: 4 });
+  d.add({ id: 'b2', title: 'X', author: 'A' });
+  await settled(d);
+  assert.equal(d.get('b2').status, 'error');
+  assert.match(d.get('b2').error, /Couldn't write the file: fs.seek not allowed/);
+});
+
+test('a file shorter than the saved byte count resumes from its real end, leaving no hole', async () => {
+  const { fetchFn } = server(DATA, { failOnCall: 2 });
+  const { dl, files } = setup(fetchFn);
+  dl.add({ id: 'b1', title: 'Emma', author: 'A' });
+  await settled(dl);
+  files['downloads/b1/0.mp3'].length = 2; // the disk kept less than we counted
+  dl.retry('b1');
+  await settled(dl);
+  assert.equal(dl.get('b1').status, 'done');
+  assert.deepEqual(files['downloads/b1/0.mp3'], [1, 2, 3, 4, 5]);
 });
