@@ -310,24 +310,21 @@ const PL = {
 
 function syncPlayer(close = false) {
   if (!player.s) return;
-  // a local copy has no streaming session: remember the place here and, if the server is reachable, there too
-  if (!player.s.sessionId) {
-    store.set('pos.' + player.id, position());
-    player.listened = 0;
-    return state.session ? client().saveProgress(player.id, position(), player.s.duration).catch(() => {}) : undefined;
-  }
-  const body = { currentTime: position(), timeListened: Math.round(player.listened), duration: player.s.duration };
+  store.set('pos.' + player.id, position()); // the place is always kept here too, for offline starts
+  const { sessionId, duration } = player.s, body = { currentTime: position(), timeListened: Math.round(player.listened), duration };
   player.listened = 0;
-  return client().sync(player.s.sessionId, body, close).catch(() => {});
+  // no session (server was unreachable at start) or a dead one: write the place directly, listening time of that stretch is not counted
+  // shortcut: offline listening time is lost from the stats, only the position survives; queue it locally if that ever matters
+  const direct = () => client().saveProgress(player.id, body.currentTime, duration);
+  return (sessionId ? client().sync(sessionId, body, close).catch(direct) : state.session ? direct() : Promise.resolve()).catch(() => {});
 }
 // a book that was streaming while it downloaded moves to the local copy, at the same spot, once it is complete
 async function swapToLocal(id) {
   const s = player.s;
-  if (player.id !== id || !s?.sessionId || !audio()) return;
+  if (player.id !== id || s?.local || !audio()) return;
   const local = await dl.session(id, 0), a = audio(), pos = position(), playing = !a.paused;
   if (!local || player.s !== s) return;
-  await syncPlayer(true); // closes the streaming session
-  s.sessionId = null; s.tracks = local.tracks;
+  s.local = true; s.tracks = local.tracks; // the server session stays open, only the audio source changes
   player.i = trackAt(s, pos); player.last = 0;
   a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, pos - s.tracks[player.i].start); if (playing) a.play(); }, { once: true });
   a.src = s.tracks[player.i].url;
@@ -420,10 +417,14 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
   el.innerHTML = `<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted" id="np-status">Loading…</div></div>`;
   const status = m => { const n = document.getElementById('np-status'); if (n) n.textContent = m; };
   try {
-    // from the local copy when it is complete, otherwise streamed; a copy resumes from the server's position when it can be reached
+    // audio comes from the local copy when it is complete, otherwise from the server. Either way a server session is opened when it can
+    // be reached, so the resume point and the listening stats are the server's. Offline, only the place is remembered here.
     const local = dl && await dl.session(id, store.get('pos.' + id, 0));
-    if (local && state.session) local.start = await client().position(id).catch(() => local.start);
     const s = local ?? await client().play(id);
+    if (local) {
+      const srv = await client().play(id).catch(() => null);
+      Object.assign(local, { local: true, sessionId: srv?.sessionId ?? null, start: srv?.start ?? local.start });
+    }
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
@@ -451,13 +452,7 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     a.addEventListener('ended', () => {
       if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else syncPlayer();
     });
-    a.addEventListener('error', async () => {
-      // say why: a blocked or missing file and an undecodable one look the same to <audio>
-      const u = a.currentSrc || a.src;
-      const r = await fetch(u, { headers: { Range: 'bytes=0-0' } }).catch(e => ({ status: 0, why: String(e) }));
-      const why = r.status ? `HTTP ${r.status}, ${r.headers?.get('content-type') ?? 'no type'}` : r.why;
-      status(`Can't play this file (${a.error?.message || 'code ' + a.error?.code}; ${why})`);
-    });
+    a.addEventListener('error', () => status(`Can't play this file (${a.error?.message || 'code ' + a.error?.code})`));
     el.onclick = e => {
       const ch = e.target.closest('[data-ch]');
       if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(false); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();

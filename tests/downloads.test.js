@@ -139,3 +139,24 @@ test('onDone fires once when a book finishes', async () => {
   await settled(d);
   assert.deepEqual(done, ['b1']);
 });
+
+test('a failing size check stops the download with a disk error instead of restarting it', async () => {
+  const { fetchFn } = server(DATA);
+  const fs2 = { mkdir: async () => {}, open: async () => ({ seek: async () => {}, write: async () => {}, close: async () => {} }), remove: async () => {}, stat: async () => { throw 'denied'; } };
+  const api = () => ({ item: async () => ({ duration: 10, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: 5, duration: 10, start: 0 }] }) });
+  const d = makeDownloads({ fetchFn, fs: fs2, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit: 0 }), api, urlFor: async f => f, load: () => null, save: () => {}, chunk: 4 });
+  d.add({ id: 'b3', title: 'X', author: 'A' });
+  await settled(d);
+  assert.equal(d.get('b3').status, 'error');
+  assert.match(d.get('b3').error, /Couldn't write the file: denied/);
+});
+
+test('a finished book whose files lost bytes is not offered for offline play', async () => {
+  const { fetchFn } = server(DATA);
+  const { dl, files } = setup(fetchFn);
+  dl.add({ id: 'b1', title: 'Emma', author: 'A' });
+  await settled(dl);
+  assert.ok(await dl.session('b1', 0));
+  files['downloads/b1/0.mp3'].length = 3;
+  assert.equal(await dl.session('b1', 0), null);
+});

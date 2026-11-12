@@ -59,3 +59,14 @@ test('stats flatten per-book listening time and finished books', async () => {
   const api = absClient(async url => reply(url.endsWith('/api/me') ? { mediaProgress: [{ libraryItemId: 'i1', isFinished: true, finishedAt: 5 }, { libraryItemId: 'i2', isFinished: false }] } : { days: { '2026-11-12': 60 }, items: { i1: { id: 'i1', timeListening: 90, mediaMetadata: { title: 'Emma', authors: [{ name: 'Jane Austen' }] } } } }), { server: 'https://x.example' });
   assert.deepEqual(await api.stats(), { days: { '2026-11-12': 60 }, items: [{ id: 'i1', title: 'Emma', author: 'Jane Austen', secs: 90 }], finished: [{ id: 'i1', at: 5 }] });
 });
+
+test('saveProgress writes the place and marks the book finished only at the very end', async () => {
+  const seen = [];
+  const api = absClient(async (url, init) => (seen.push({ url, method: init.method, body: JSON.parse(init.body) }), reply({})), { server: 'https://x.example' });
+  await api.saveProgress('i1', 25, 100);
+  await api.saveProgress('i1', 99.5, 100);
+  assert.equal(seen[0].url, 'https://x.example/api/me/progress/i1');
+  assert.equal(seen[0].method, 'PATCH');
+  assert.deepEqual(seen[0].body, { currentTime: 25, duration: 100, progress: 0.25, isFinished: false });
+  assert.equal(seen[1].body.isFinished, true);
+});

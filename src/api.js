@@ -32,7 +32,6 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
     },
     // progress for a book played from a local copy: no streaming session exists, so write it directly
     saveProgress: (id, currentTime, duration) => call(`/api/me/progress/${id}`, { method: 'PATCH', body: JSON.stringify({ currentTime, duration, progress: duration ? Math.min(1, currentTime / duration) : 0, isFinished: duration > 0 && currentTime >= duration - 1 }) }, true),
-    position: async id => (await call(`/api/me/progress/${id}`)).currentTime || 0,
     sync: (sessionId, body, close = false) => call(`/api/session/${sessionId}/${close ? 'close' : 'sync'}`, { method: 'POST', body: JSON.stringify(body) }, true),
     // series list: each entry carries its books in reading order
     series: async libId => (await call(`/api/libraries/${libId}/series?limit=200&sort=name`)).results.map(x => ({ id: x.id, name: x.name, books: (x.books || []).map(book) })),
