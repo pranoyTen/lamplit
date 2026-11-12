@@ -53,6 +53,16 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
         duration: m.duration || 0, size: m.size || 0, chapters: (m.chapters || []).length, progress: p?.progress || 0, finished: !!p?.isFinished
       };
     },
+    // listening time per day and per book, plus which books are finished
+    async stats() {
+      const [st, me] = await Promise.all([call('/api/me/listening-stats'), call('/api/me')]);
+      const author = md => md?.authorName ?? md?.authors?.[0]?.name ?? md?.author ?? '';
+      return {
+        days: st.days || {},
+        items: Object.values(st.items || {}).map(i => ({ id: i.id, title: i.mediaMetadata?.title ?? '', author: author(i.mediaMetadata), secs: i.timeListening ?? i.timeListened ?? 0 })),
+        finished: (me.mediaProgress || []).filter(p => p.isFinished).map(p => ({ id: p.libraryItemId, at: p.finishedAt || p.lastUpdate || 0 }))
+      };
+    },
     renameSeries: (id, name) => call(`/api/series/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }, true),
     coverUrl: id => `${base}/api/items/${id}/cover?width=400&token=${encodeURIComponent(token)}`
   };
