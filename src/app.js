@@ -245,13 +245,29 @@ views.stats = async () => {
   return `<div id="statspage" class="col" style="gap:32px">${statsHtml()}</div>`;
 };
 
+views.player = async () => {
+  const s = player.s;
+  const back = `<div><button class="lnk back" data-act="back">${svg('<path d="m6 9 6 6 6-6"/>', 16)}Collapse player</button></div>`;
+  if (!s) return `${back}<div class="col g4"><h1>Player</h1><div class="muted">Nothing is playing. Pick a book from Home or Library</div></div>`;
+  const pk = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-act="pk" data-v="${k}" id="pp-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
+  return `${back}<div class="pp">
+<section class="pp-main"><div class="cover pp-cover" style="background:${tint(s.title)}">${esc(s.title)}<img class="cover-img" src="${esc(client().coverUrl(player.id))}" alt=""></div>
+<div class="col g4"><h1>${esc(s.title)}</h1><div class="muted">${esc(s.author)}</div><div class="muted" id="pp-sub"></div></div>
+<div class="col g8"><input type="range" class="pp-seek" id="pp-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book"><div class="row cap muted" style="flex-wrap:nowrap"><span id="pp-t0"></span><span id="pp-t1"></span></div></div>
+<div class="pp-ctl">${pk('prev', 'Previous chapter', svg(PL.prev, 24))}${pk('back', 'Back 15 seconds', skipIcon(15, true))}${pk('toggle', 'Pause', svg(PL.pause, 28), 'main big')}${pk('fwd', 'Forward 30 seconds', skipIcon(30, false))}${pk('next', 'Next chapter', svg(PL.next, 24))}</div>
+<div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div></section>
+${s.chapters.length ? `<section class="col g12 pp-side"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
+</div>`;
+};
+
 // ---- render ----
 let seq = 0;
 const failure = e => `<div role="alert" class="danger">Error: ${e.status ? `The server answered ${e.status}.` : `Can't reach ${esc(state.session.server)}. Check the address or your connection.`} <a href="#/settings" style="text-decoration:underline">Check Settings</a></div>`;
 
 async function render() {
-  const [route, arg] = location.hash.slice(2).split('/'), n = ++seq, r = [...NAV, 'book'].includes(route) ? route : (state.session ? 'home' : 'settings');
+  const [route, arg] = location.hash.slice(2).split('/'), n = ++seq, r = [...NAV, 'book', 'player'].includes(route) ? route : (state.session ? 'home' : 'settings');
   document.documentElement.dataset.theme = state.theme;
+  document.body.classList.toggle('full', r === 'player'); // the full player replaces the mini bar
   if (state.session && !state.libs) await loadLibs();
   if (n !== seq) return;
   const loading = state.session && r !== 'settings';
@@ -261,7 +277,7 @@ async function render() {
   if (!loading) return;
   let html;
   try { html = await views[r](arg); } catch (e) { if (e.status === 401) return signOut('Error: Your session expired. Sign in again.'); html = failure(e); }
-  if (n === seq) document.getElementById('main').innerHTML = html;
+  if (n === seq) { document.getElementById('main').innerHTML = html; if (r === 'player') paintPage(true); }
 }
 
 // the Library page needs a selected library that is still switched on
@@ -423,6 +439,22 @@ const ctl = {
   }
 };
 
+function paintPage(first = false) {
+  const s = player.s, a = audio(), sk = document.getElementById('pp-seek');
+  if (!s || !a || !sk) return;
+  const t = position(), c = chapterAt(s, t);
+  if (!sk.matches(':active')) { sk.value = Math.floor(t); sk.style.setProperty('--p', (s.duration ? t / s.duration * 100 : 0) + '%'); }
+  document.getElementById('pp-t0').textContent = clock(t);
+  document.getElementById('pp-t1').textContent = '-' + clock(s.duration - t);
+  document.getElementById('pp-sub').textContent = (c >= 0 ? `Chapter ${c + 1} of ${s.chapters.length} · ` : '') + len(Math.max(0, s.duration - t)) + ' left';
+  const tg = document.getElementById('pp-toggle');
+  tg.innerHTML = svg(a.paused ? PL.play : PL.pause, 28);
+  tg.setAttribute('aria-label', a.paused ? 'Play' : 'Pause');
+  document.querySelectorAll('#pp-chs [data-v]').forEach((b, i) => i === c ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current'));
+  document.querySelectorAll('[data-act=prate]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.v === player.rate)));
+  const list = document.getElementById('pp-chs'), cur = list?.querySelector('[aria-current]');
+  if (first && cur) list.scrollTop = cur.offsetTop - (list.clientHeight - cur.offsetHeight) / 2; // centre the current chapter when the page opens
+}
 function paintPlayer() {
   const s = player.s, a = audio();
   if (!s || !a) return;
@@ -435,6 +467,7 @@ function paintPlayer() {
   document.getElementById('np-toggle').innerHTML = svg(a.paused ? PL.play : PL.pause, 24);
   document.getElementById('np-toggle').setAttribute('aria-label', a.paused ? 'Play' : 'Pause');
   paintCovers();
+  paintPage();
 }
 
 async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
@@ -454,13 +487,14 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
       Object.assign(local, { local: true, sessionId: srv?.sessionId ?? null, start: srv?.start ?? local.start });
     }
     if (!s.tracks.length) throw new Error('no audio');
-    s.author = author;
+    s.author = author; s.title = title;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
     el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book">
 <div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-status">${esc(author)}</span> · <span id="np-time"></span></div></div>
 <div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
 <div class="vol"><button class="ib" data-k="mute" id="np-mute"></button><input type="range" id="np-vol" min="0" max="1" step="0.05" aria-label="Volume"></div>
+<a class="ib" href="#/player" id="np-open" aria-label="Open player">${svg('<path d="m6 15 6-6 6 6"/>', 24)}</a>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
 <audio id="audio"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
     const a = audio();
@@ -495,6 +529,7 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     document.onclick = e => { if (!e.target.closest('.chap')) toggleMenu(); };
     el.onkeydown = e => { if (e.key === 'Escape') { toggleMenu(); e.target.closest('.chap')?.querySelector('[aria-haspopup]')?.focus(); } };
     paintPlayer();
+    if (location.hash === '#/player') render(); // the page was open before anything was loaded
   } catch (e) {
     if (!autoplay) return stopPlayer(); // a quiet preload that fails just leaves the player hidden
     player.id = null; paintCovers();
@@ -523,6 +558,9 @@ function confirmBox({ title, message, ok, cancel = 'Keep' }) {
 }
 
 const act = {
+  pk: d => { ctl[d.v]?.(); return true; },
+  prate: d => { ctl.rate(+d.v); paintPage(); return true; },
+  pch: d => { seek(player.s.chapters[d.v].start); return true; },
   // same book: toggle pause; another book: start it; ignored while the session is still opening
   play: d => { if (player.id !== d.v) startPlayer(d); else if (player.s) ctl.toggle(); return true; },
   theme: () => { state.theme = state.theme === 'dark' ? 'light' : 'dark'; store.set('theme', state.theme); },
@@ -569,7 +607,9 @@ document.addEventListener('click', e => {
   if (t && !act[t.dataset.act](t.dataset)) render();
 });
 document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
+document.addEventListener('change', e => { if (e.target.id === 'pp-seek') seek(+e.target.value); });
 document.addEventListener('input', e => {
+  if (e.target.id === 'pp-seek') { const t = +e.target.value; e.target.style.setProperty('--p', (player.s.duration ? t / player.s.duration * 100 : 0) + '%'); document.getElementById('pp-t0').textContent = clock(t); }
   if (e.target.id === 'dllimit' && +e.target.value > 0) { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); }
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
