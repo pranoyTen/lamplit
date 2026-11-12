@@ -126,3 +126,5 @@ button:active:not(:disabled){transform:scale(.98)}
 .fin{border-top:1px solid var(--hairline)}
 .fin li{min-height:56px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--hairline)}
 .lnk.back{display:inline-flex;align-items:center;gap:4px}
+.vol{display:flex;align-items:center;gap:4px}
+.vol input{width:96px;height:24px;margin:0;padding:0;border:0;background:none;accent-color:var(--brand)}

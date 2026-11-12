@@ -295,7 +295,7 @@ async function signIn() {
 
 // ---- player: lives outside #app so re-renders never interrupt playback ----
 // All times below are seconds from the start of the book; a book may be split over several files (tracks).
-const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1 };
+const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false };
 const RATES = [1, 1.25, 1.5, 1.75, 2, 0.75];
 const audio = () => document.getElementById('audio');
 const position = () => player.s.tracks[player.i].start + audio().currentTime;
@@ -304,6 +304,7 @@ const skipIcon = (n, back) => svg(`<path d="${back ? 'M4 12a8 8 0 1 1 2.5 5.8M4 
 const PL = {
   prev: '<path d="M6 5v14M19 5 9 12l10 7z"/>', next: '<path d="M18 5v14M5 5l10 7-10 7z"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+  vol: '<path d="M4 9v6h4l5 4V5L8 9zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>', mute: '<path d="M4 9v6h4l5 4V5L8 9zM17 9l5 6M22 9l-5 6"/>',
   play: '<path d="M8 5v14l11-7z" fill="currentColor"/>', pause: '<path d="M8 5v14M16 5v14" stroke-width="2.5"/>'
 };
 
@@ -372,7 +373,15 @@ function toggleMenu(open) {
   b.setAttribute('aria-expanded', String(!m.hidden));
   if (!m.hidden) m.querySelector('[aria-current]')?.scrollIntoView({ block: 'center' });
 }
+function paintVolume() {
+  const a = audio(), off = player.muted || player.vol === 0;
+  if (a) a.volume = player.vol, a.muted = off;
+  const b = document.getElementById('np-mute'), r = document.getElementById('np-vol');
+  if (b) { b.innerHTML = svg(off ? PL.mute : PL.vol, 24); b.setAttribute('aria-label', off ? 'Unmute' : 'Mute'); }
+  if (r) r.value = off ? 0 : player.vol;
+}
 const ctl = {
+  mute: () => { player.muted = !player.muted; if (!player.muted && player.vol === 0) player.vol = 0.5; paintVolume(); },
   chapters: () => toggleMenu(),
   prev: () => chapterStep(-1), next: () => chapterStep(1),
   back: () => seek(position() - 15), fwd: () => seek(position() + 30),
@@ -417,10 +426,13 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book">
 <div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-status">${esc(author)}</span> · <span id="np-time"></span></div></div>
 <div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<button class="ib txt" data-k="rate" id="np-rate" aria-label="Playback speed">${player.rate}×</button></div>
+<div class="vol"><button class="ib" data-k="mute" id="np-mute"></button><input type="range" id="np-vol" min="0" max="1" step="0.05" aria-label="Volume"></div>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
 <audio id="audio"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
     const a = audio();
     a.defaultPlaybackRate = a.playbackRate = player.rate;
+    paintVolume();
+    el.querySelector('#np-vol').oninput = e => { player.vol = +e.target.value; player.muted = false; store.set('vol', player.vol); paintVolume(); };
     a.addEventListener('loadedmetadata', () => { if (player.last === 0 && s.start) a.currentTime = Math.max(0, s.start - s.tracks[player.i].start); }, { once: true });
     a.addEventListener('timeupdate', () => {
       const d = a.currentTime - player.last;
