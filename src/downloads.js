@@ -12,7 +12,9 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
   const opt = it => it.abs ? {} : { baseDir: base };
   const notify = () => onChange?.();
   const persist = () => save(items);
-  const fail = e => e.limit ? 'Over the storage limit. Raise it in Settings or remove books.' : e.status ? `The server answered ${e.status}.` : "Can't reach the server. Check your connection.";
+  // file-system failures come back as plain strings; tag them so they are not mistaken for a network problem
+  const disk = p => Promise.resolve(p).catch(e => { throw Object.assign(new Error(String(e?.message ?? e)), { disk: true }); });
+  const fail = e => e.disk ? `Couldn't write the file: ${e.message}` : e.limit ? 'Over the storage limit. Raise it in Settings or remove books.' : e.status ? `The server answered ${e.status}.` : "Can't reach the server. Check your connection.";
 
   async function run(it) {
     current = it.id; it.status = 'active'; it.error = ''; notify();
@@ -24,7 +26,7 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
         Object.assign(it, { root, abs, total, bytes: 0, chapters: info.chapters, duration: info.duration });
         it.tracks = info.tracks.map((t, i) => ({ ...t, file: `${dir(it)}/${i}${t.ext}`, got: 0, done: false }));
       }
-      await fs.mkdir(dir(it), { ...opt(it), recursive: true });
+      await disk(fs.mkdir(dir(it), { ...opt(it), recursive: true }));
       for (const t of it.tracks.filter(t => !t.done)) {
         // whole-file mode: the size is unknown, or the server ignored Range and sent everything
         let whole = !t.size;
@@ -34,15 +36,15 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
           if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
           if (!whole && res.status === 200) { whole = true; it.bytes -= t.got; t.got = 0; }
           const before = t.got;
-          const f = await fs.open(t.file, { write: true, create: true, truncate: t.got === 0, ...opt(it) });
+          const f = await disk(fs.open(t.file, { write: true, create: true, truncate: t.got === 0, ...opt(it) }));
           try {
-            if (t.got > 0) await f.seek(t.got, 0); // 0 = from the start; overwrites any bytes written after the last save
+            if (t.got > 0) await disk(f.seek(t.got, 0)); // 0 = from the start; overwrites any bytes written after the last save
             const reader = res.body.getReader();
             for (let r = await reader.read(); !r.done; r = await reader.read()) {
-              await f.write(r.value);
+              await disk(f.write(r.value));
               t.got += r.value.length; it.bytes += r.value.length; notify();
             }
-          } finally { await f.close(); persist(); } // saved even when cancelled, so the next run starts at t.got
+          } finally { await f.close().catch(() => {}); persist(); } // saved even when cancelled, so the next run starts at t.got
           if (whole) { t.size = t.got; break; }
           if (t.got === before) throw new Error('The server sent no data');
         }

@@ -100,3 +100,16 @@ test('a book that would pass the storage limit fails with a clear message', asyn
   assert.equal(dl.get('b1').status, 'error');
   assert.match(dl.get('b1').error, /storage limit/);
 });
+
+test('a file-system failure is reported as such, not as a network problem', async () => {
+  const { fetchFn } = server(DATA);
+
+
+  const fs2 = { mkdir: async () => {}, open: async () => { return { seek: async () => { throw 'fs.seek not allowed'; }, write: async () => {}, close: async () => {} }; }, remove: async () => {} };
+  const api = () => ({ item: async () => ({ duration: 10, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: 5, duration: 10, start: 0 }] }) });
+  const d = makeDownloads({ fetchFn, fs: fs2, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit: 0 }), api, urlFor: async f => f, load: () => null, save: () => {}, chunk: 4 });
+  d.add({ id: 'b2', title: 'X', author: 'A' });
+  await settled(d);
+  assert.equal(d.get('b2').status, 'error');
+  assert.match(d.get('b2').error, /Couldn't write the file: fs.seek not allowed/);
+});
