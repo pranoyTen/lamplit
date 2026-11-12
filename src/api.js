@@ -3,12 +3,13 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
   const base = server.trim().replace(/\/+$/, '');
   if (!/^https?:\/\/[^/\s]+/.test(base)) throw Object.assign(new Error('Start the address with http:// or https://'), { badAddress: true });
 
-  async function call(path, init = {}) {
+  async function call(path, init = {}, noBody = false) {
     const res = await fetchFn(base + path, { ...init, headers: { 'Content-Type': 'application/json', ...(token && { Authorization: 'Bearer ' + token }) } });
     if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
-    return res.json();
+    return noBody ? null : res.json();
   }
-  const book = i => ({ id: i.id, title: i.media.metadata.title, author: i.media.metadata.authorName ?? i.media.metadata.author ?? '', duration: i.media.duration || 0 });
+  const withToken = u => base + u + (u.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+  const book = i => ({ id: i.id, libraryId: i.libraryId, title: i.media.metadata.title, author: i.media.metadata.authorName ?? i.media.metadata.author ?? '', duration: i.media.duration || 0 });
 
   return {
     base,
@@ -24,6 +25,12 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
     },
     inProgress: async () => (await call('/api/me/items-in-progress')).libraryItems.map(book),
     progress: async () => Object.fromEntries((await call('/api/me')).mediaProgress.map(p => [p.libraryItemId, p.progress])),
+    // opens a playback session; start is where the server last left off, in seconds from the book's start
+    async play(id) {
+      const s = await call(`/api/items/${id}/play`, { method: 'POST', body: JSON.stringify({ deviceInfo: { clientName: 'Lectern' }, forceDirectPlay: true, supportedMimeTypes: ['audio/mpeg', 'audio/mp4', 'audio/flac', 'audio/ogg'] }) });
+      return { sessionId: s.id, start: s.currentTime || 0, duration: s.duration || 0, chapters: (s.chapters || []).map(c => ({ start: c.start, end: c.end, title: c.title })), tracks: s.audioTracks.map(t => ({ url: withToken(t.contentUrl), start: t.startOffset || 0, duration: t.duration })) };
+    },
+    sync: (sessionId, body, close = false) => call(`/api/session/${sessionId}/${close ? 'close' : 'sync'}`, { method: 'POST', body: JSON.stringify(body) }, true),
     coverUrl: id => `${base}/api/items/${id}/cover?width=400&token=${encodeURIComponent(token)}`
   };
 }
