@@ -2,35 +2,78 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { makeDownloads } = require('../src/downloads.js');
 
-const stream = chunks => ({ ok: true, body: { getReader: () => { const q = [...chunks]; return { read: async () => q.length ? { done: false, value: q.shift() } : { done: true } }; } } });
-const setup = (fetchFn, limit = 0) => {
-  const written = {}, removed = [];
-  let saved;
+const bytes = (...n) => Uint8Array.from(n);
+// a server that honours Range (or ignores it when ranges = false) and records every request
+const server = (data, { ranges = true, failOnCall = 0 } = {}) => {
+  const calls = [];
+  const fetchFn = async (url, init = {}) => {
+    calls.push(init.headers?.Range);
+    if (calls.length === failOnCall) throw new Error('network down');
+    const body = r => ({ getReader: () => { let sent = false; return { read: async () => sent ? { done: true } : (sent = true, { done: false, value: r }) }; } });
+    const m = /bytes=(\d+)-(\d+)/.exec(init.headers?.Range ?? '');
+    return m && ranges ? { ok: true, status: 206, body: body(data[url].slice(+m[1], +m[2] + 1)) } : { ok: true, status: 200, body: body(data[url]) };
+  };
+  return { fetchFn, calls };
+};
+const setup = (fetchFn, { limit = 0, chunk = 4, sizes = [5, 3] } = {}) => {
+  const files = {}, removed = [];
   const fs = {
     mkdir: async () => {},
-    open: async path => ({ write: async b => { written[path] = (written[path] ?? 0) + b.length; }, close: async () => {} }),
+    open: async (path, o) => {
+      if (o.truncate || !files[path]) files[path] = [];
+      let pos = 0;
+      return { seek: async n => { pos = n; }, write: async b => { for (const x of b) files[path][pos++] = x; }, close: async () => {} };
+    },
     remove: async p => { removed.push(p); }
   };
-  const api = () => ({ item: async () => ({ duration: 20, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: 5, duration: 10, start: 0 }, { url: 'u2', ext: '.mp3', size: 3, duration: 10, start: 10 }] }) });
-  const dl = makeDownloads({ fetchFn, fs, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit }), api, urlFor: async f => 'asset://' + f, load: () => null, save: s => { saved = s; } });
-  return { dl, written, removed, saved: () => saved };
+  const api = () => ({ item: async () => ({ duration: 20, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: sizes[0], duration: 10, start: 0 }, { url: 'u2', ext: '.mp3', size: sizes[1], duration: 10, start: 10 }] }) });
+  const dl = makeDownloads({ fetchFn, fs, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit }), api, urlFor: async f => 'asset://' + f, load: () => null, save: () => {}, chunk });
+  return { dl, files, removed };
 };
 const settled = dl => new Promise(r => { const t = setInterval(() => { if (dl.list().every(i => i.status !== 'queued' && i.status !== 'active')) { clearInterval(t); r(); } }, 5); });
+const DATA = { u1: bytes(1, 2, 3, 4, 5), u2: bytes(6, 7, 8) };
 
-test('a queued book downloads every file and becomes playable offline', async () => {
-  const { dl, written } = setup(async url => stream(url === 'u1' ? [new Uint8Array(5)] : [new Uint8Array(2), new Uint8Array(1)]));
+test('a queued book downloads every file in chunks and becomes playable offline', async () => {
+  const { fetchFn, calls } = server(DATA);
+  const { dl, files } = setup(fetchFn);
   dl.add({ id: 'b1', title: 'Emma', author: 'Jane Austen' });
   await settled(dl);
   assert.equal(dl.get('b1').status, 'done');
-  assert.deepEqual(written, { 'downloads/b1/0.mp3': 5, 'downloads/b1/1.mp3': 3 });
+  assert.deepEqual(calls, ['bytes=0-3', 'bytes=4-4', 'bytes=0-2']);
+  assert.deepEqual(files, { 'downloads/b1/0.mp3': [1, 2, 3, 4, 5], 'downloads/b1/1.mp3': [6, 7, 8] });
   assert.equal(dl.bytes(), 8);
   const s = await dl.session('b1', 12);
   assert.deepEqual(s.tracks.map(t => [t.url, t.start]), [['asset://downloads/b1/0.mp3', 0], ['asset://downloads/b1/1.mp3', 10]]);
 });
 
+test('a download cut off mid-way resumes from the last saved byte', async () => {
+  const { fetchFn, calls } = server(DATA, { failOnCall: 2 }); // dies when asking for the second chunk
+  const { dl, files } = setup(fetchFn);
+  dl.add({ id: 'b1', title: 'Emma', author: 'A' });
+  await settled(dl);
+  assert.equal(dl.get('b1').status, 'error');
+  assert.equal(dl.get('b1').tracks[0].got, 4);
+  dl.retry('b1');
+  await settled(dl);
+  assert.equal(dl.get('b1').status, 'done');
+  assert.deepEqual(calls.slice(0, 3), ['bytes=0-3', 'bytes=4-4', 'bytes=4-4']); // retried from byte 4, not 0
+  assert.deepEqual(files['downloads/b1/0.mp3'], [1, 2, 3, 4, 5]);
+});
+
+test('a server that ignores Range still delivers the whole file', async () => {
+  const { fetchFn } = server(DATA, { ranges: false });
+  const { dl, files } = setup(fetchFn);
+  dl.add({ id: 'b1', title: 'Emma', author: 'A' });
+  await settled(dl);
+  assert.equal(dl.get('b1').status, 'done');
+  assert.deepEqual(files['downloads/b1/0.mp3'], [1, 2, 3, 4, 5]);
+  assert.equal(dl.bytes(), 8);
+});
+
 test('a server error marks the book failed and retry queues it again', async () => {
   let fail = true;
-  const { dl } = setup(async () => fail ? { ok: false, status: 503 } : stream([new Uint8Array(5)]));
+  const ok = server(DATA).fetchFn;
+  const { dl } = setup(async (u, i) => fail ? { ok: false, status: 503 } : ok(u, i));
   dl.add({ id: 'b1', title: 'Emma', author: 'A' });
   await settled(dl);
   assert.equal(dl.get('b1').status, 'error');
@@ -42,7 +85,7 @@ test('a server error marks the book failed and retry queues it again', async () 
 });
 
 test('removing a book deletes its folder', async () => {
-  const { dl, removed } = setup(async () => stream([new Uint8Array(5)]));
+  const { dl, removed } = setup(server(DATA).fetchFn);
   dl.add({ id: 'b1', title: 'Emma', author: 'A' });
   await settled(dl);
   await dl.remove('b1');
@@ -51,7 +94,7 @@ test('removing a book deletes its folder', async () => {
 });
 
 test('a book that would pass the storage limit fails with a clear message', async () => {
-  const { dl } = setup(async () => stream([new Uint8Array(5)]), 6);
+  const { dl } = setup(server(DATA).fetchFn, { limit: 6 });
   dl.add({ id: 'b1', title: 'Emma', author: 'A' });
   await settled(dl);
   assert.equal(dl.get('b1').status, 'error');
