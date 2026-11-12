@@ -412,7 +412,13 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     a.addEventListener('ended', () => {
       if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else syncPlayer();
     });
-    a.addEventListener('error', () => status("Can't play this file. The server may be sending a format this app can't decode."));
+    a.addEventListener('error', async () => {
+      // say why: a blocked or missing file and an undecodable one look the same to <audio>
+      const u = a.currentSrc || a.src;
+      const r = await fetch(u, { headers: { Range: 'bytes=0-0' } }).catch(e => ({ status: 0, why: String(e) }));
+      const why = r.status ? `HTTP ${r.status}, ${r.headers?.get('content-type') ?? 'no type'}` : r.why;
+      status(`Can't play this file (${a.error?.message || 'code ' + a.error?.code}; ${why})`);
+    });
     el.onclick = e => {
       const ch = e.target.closest('[data-ch]');
       if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(false); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();
