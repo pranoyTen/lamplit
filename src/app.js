@@ -542,7 +542,12 @@ const act = {
   dlpause: () => { dl.paused ? dl.resumeAll() : dl.pauseAll(); paintDownloads(); return true; },
   dlclean: () => { dl.removeFinished().then(paintDownloads); return true; },
   dlretry: d => { dl.retry(d.v); paintDownloads(); return true; },
-  dlremove: d => { dl.remove(d.v).then(() => location.hash.startsWith('#/book/') ? render() : paintDownloads()); return true; },
+  dlremove: async d => {
+    const it = dl.get(d.v), done = it?.status === 'done';
+    const ok = await T.dialog.ask(done ? `Remove "${it.title}" from this computer? You can download it again later.` : `Cancel the download of "${it?.title}" and delete what was saved so far?`, { title: done ? 'Remove download' : 'Cancel download', kind: 'warning', okLabel: done ? 'Remove' : 'Cancel download', cancelLabel: 'Keep' });
+    if (ok) await dl.remove(d.v).then(() => location.hash.startsWith('#/book/') ? render() : paintDownloads());
+    return true;
+  },
   range: d => { state.statsRange = d.v; document.getElementById('statspage').innerHTML = statsHtml(); return true; },
   rename: () => { state.renaming = !state.renaming; state.renameErr = ''; paintSerHead(); return true; }
 };
