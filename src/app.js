@@ -13,6 +13,7 @@ const state = {
   libId: store.get('lib', null),
   dlcfg: store.get('dlcfg', { limitGB: 10, dir: null }), // download cap in GB and chosen folder (null = app data)
   statsRange: 'year', stats: null,
+  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, ...store.get('pb', {}) }, // Settings > Playback
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
   items: [], q: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
@@ -112,6 +113,16 @@ views.series = async id => {
 
 
 const setrow = (label, desc, id, ctl) => `<div class="setrow field"><div class="info"><label for="${id}">${label}</label>${desc ? `<div class="cap muted">${desc}</div>` : ''}</div>${ctl}</div>`;
+// Playback settings: pill choices, a sleep-timer list and two switches; changes apply to the player straight away
+const PB_SPEEDS = [0.75, 1, 1.25, 1.5, 2], PB_BACK = [10, 15, 30], PB_FWD = [15, 30, 60];
+const pills = (key, label, opts, fmt) => `<div class="row g8" id="pb-${key}" role="group" aria-label="${label}">${opts.map(o => `<button class="seg" data-act="pb" data-k="${key}" data-v="${o}" aria-pressed="${state.pb[key] === o}">${fmt(o)}</button>`).join('')}</div>`;
+const switchRow = (key, label, desc) => setrow(label, desc, 'pb-' + key, `<input type="checkbox" id="pb-${key}" data-act="pbtoggle" data-v="${key}"${state.pb[key] ? ' checked' : ''}>`);
+const playbackSettings = () => `<section class="col g12"><h2>Playback</h2><div class="card panel">${setrow('Default speed', "Used for books you haven't changed the speed of", 'pb-speed', pills('speed', 'Default speed', PB_SPEEDS, o => o + '×'))}
+${setrow('Skip back', 'Also used by the left arrow key', 'pb-back', pills('back', 'Skip back', PB_BACK, o => o + 's'))}
+${setrow('Skip forward', 'Also used by the right arrow key', 'pb-fwd', pills('fwd', 'Skip forward', PB_FWD, o => o + 's'))}
+${setrow('Default sleep timer', 'Starts when you press play, then pauses', 'pb-sleep', `<select id="pb-sleep">${[[0, 'Off'], [15, '15 minutes'], [30, '30 minutes'], [45, '45 minutes'], ['chapter', 'End of chapter']].map(([v, l]) => `<option value="${v}"${state.pb.sleep === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`)}
+${switchRow('rewind', 'Step back after a pause', 'Rewind 10 seconds when you resume after stopping for over a minute')}
+${switchRow('autoNext', 'Play the next chapter automatically', 'Keep going at the end of a chapter instead of stopping')}</div></section>`;
 const settings = () => {
   const a = state.acct, s = state.session;
   const body = s
@@ -129,7 +140,7 @@ ${a.error ? `<div role="alert" class="danger" style="padding:12px 0;border-top:1
     }).join('')}</div></section>` : '';
   const dls = dl ? `<section class="col g12"><h2>Downloads</h2><div class="card panel">${setrow('Storage limit', `${bytes(dl.bytes())} used. Books that would pass it are not downloaded`, 'dllimit', `<div class="row g8" style="align-items:center"><input id="dllimit" type="number" min="1" step="1" value="${state.dlcfg.limitGB}" style="width:96px"><span class="muted">GB</span></div>`)}
 ${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}</div></section>` : '';
-  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${dls}</div>`;
+  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}</div>`;
 };
 
 // ---- downloads: offline copies in the app data folder (desktop app only) ----
@@ -254,7 +265,7 @@ views.player = async () => {
 <section class="pp-main"><div class="cover pp-cover" style="background:${tint(s.title)}">${esc(s.title)}<img class="cover-img" src="${esc(client().coverUrl(player.id))}" alt=""></div>
 <div class="col g4"><h1>${esc(s.title)}</h1><div class="muted">${esc(s.author)}</div><div class="muted" id="pp-sub"></div></div>
 <div class="col g8"><input type="range" class="pp-seek" id="pp-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter"><div class="row cap muted" style="flex-wrap:nowrap"><span id="pp-t0"></span><span id="pp-t1"></span></div></div>
-<div class="pp-ctl">${pk('prev', 'Previous chapter', svg(PL.prev, 24))}${pk('back', 'Back 15 seconds', skipIcon(15, true))}${pk('toggle', 'Pause', svg(PL.pause, 28), 'main big')}${pk('fwd', 'Forward 30 seconds', skipIcon(30, false))}${pk('next', 'Next chapter', svg(PL.next, 24))}</div>
+<div class="pp-ctl">${pk('prev', 'Previous chapter', svg(PL.prev, 24))}${pk('back', `Back ${state.pb.back} seconds`, skipIcon(state.pb.back, true))}${pk('toggle', 'Pause', svg(PL.pause, 28), 'main big')}${pk('fwd', `Forward ${state.pb.fwd} seconds`, skipIcon(state.pb.fwd, false))}${pk('next', 'Next chapter', svg(PL.next, 24))}</div>
 <div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div></section>
 ${s.chapters.length ? `<section class="col g12 pp-side"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
 </div>`;
@@ -324,7 +335,7 @@ async function signIn() {
 
 // ---- player: lives outside #app so re-renders never interrupt playback ----
 // All times below are seconds from the start of the book; a book may be split over several files (tracks).
-const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false };
+const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false, pausedAt: null, sleepAt: null, sleepCh: null };
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const audio = () => document.getElementById('audio');
 const position = () => player.s.tracks[player.i].start + audio().currentTime;
@@ -429,16 +440,24 @@ const ctl = {
   chapters: () => toggleMenu('chap'),
   speed: () => toggleMenu('speed'),
   prev: () => chapterStep(-1), next: () => chapterStep(1),
-  back: () => seek(position() - 15), fwd: () => seek(position() + 30),
+  back: () => seek(position() - state.pb.back), fwd: () => seek(position() + state.pb.fwd),
   toggle: () => { const a = audio(); a.paused ? a.play() : a.pause(); },
   rate: r => {
     player.rate = r;
+    store.set('rate.' + player.id, r);
     audio().defaultPlaybackRate = audio().playbackRate = r;
     document.getElementById('np-rate').textContent = r + '×';
     document.querySelectorAll('#np-smenu [data-rate]').forEach(b => +b.dataset.rate === r ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current'));
   }
 };
 
+// a skip amount changed in Settings: relabel the buttons that are already on screen
+function paintSkips() {
+  for (const [k, back] of [['back', true], ['fwd', false]]) {
+    const n = state.pb[k], label = (back ? 'Back ' : 'Forward ') + n + ' seconds';
+    for (const id of ['np-', 'pp-']) { const b = document.getElementById(id + k); if (b) { b.innerHTML = skipIcon(n, back); b.setAttribute('aria-label', label); } }
+  }
+}
 function chapterSpan() {
   const s = player.s, t = position(), c = chapterAt(s, t);
   const start = c >= 0 ? s.chapters[c].start : 0;
@@ -505,11 +524,12 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author; s.title = title;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
+    player.rate = store.get('rate.' + id, state.pb.speed); player.pausedAt = player.sleepAt = player.sleepCh = null; // a speed picked for this book wins over the default
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
     el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter">
 <a class="ib" href="#/player" id="np-open" aria-label="Open player">${svg('<path d="m6 15 6-6 6 6"/>', 24)}</a>
 <div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-chap"></span><span id="np-time"></span><span id="np-status"></span></div></div>
-<div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
+<div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', `Back ${state.pb.back} seconds`, skipIcon(state.pb.back, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', `Forward ${state.pb.fwd} seconds`, skipIcon(state.pb.fwd, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
 <div class="vol"><button class="ib" data-k="mute" id="np-mute"></button><input type="range" id="np-vol" min="0" max="1" step="0.05" aria-label="Volume"></div>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
 <audio id="audio"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
@@ -523,10 +543,26 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       if (d > 0 && d < 2) player.listened += d;
       player.last = a.currentTime;
       if (player.listened >= 15) syncPlayer();
+      if (!a.paused) {
+        const sp = chapterSpan();
+        if (player.sleepAt && Date.now() >= player.sleepAt) a.pause();
+        // stop at a chapter's end when auto-advance is off, or when the sleep timer is set to end of chapter
+        else if (sp.c >= 0 && sp.t >= sp.end - 0.5 && (!state.pb.autoNext || player.sleepCh === sp.c)) { a.pause(); seek(sp.end); }
+      }
       if (!el.querySelector('#np-seek:active')) paintPlayer();
     });
-    a.addEventListener('play', paintPlayer);
-    a.addEventListener('pause', () => { paintPlayer(); syncPlayer(); });
+    a.addEventListener('play', () => {
+      paintPlayer();
+      if (state.pb.rewind && player.pausedAt && Date.now() - player.pausedAt > 60000) seek(position() - 10);
+      player.pausedAt = null;
+      const m = state.pb.sleep; // the sleep timer starts with the press of play, and is not restarted by moving to the next file
+      if (m === 'chapter' && player.sleepCh === null) player.sleepCh = chapterSpan().c;
+      else if (m > 0 && !player.sleepAt) player.sleepAt = Date.now() + m * 60000;
+    });
+    a.addEventListener('pause', () => {
+      paintPlayer(); syncPlayer();
+      if (!a.ended) { player.pausedAt = Date.now(); player.sleepAt = player.sleepCh = null; } // the end of a file is not a pause by the listener
+    });
     a.addEventListener('ended', () => {
       if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else syncPlayer();
     });
@@ -573,7 +609,10 @@ function confirmBox({ title, message, ok, cancel = 'Keep' }) {
   });
 }
 
+const savePb = () => { store.set('pb', state.pb); paintSkips(); };
 const act = {
+  pb: d => { state.pb[d.k] = +d.v; savePb(); },
+  pbtoggle: d => { state.pb[d.v] = !state.pb[d.v]; savePb(); },
   pk: d => { ctl[d.v]?.(); return true; },
   prate: d => { ctl.rate(+d.v); paintPage(); return true; },
   pch: d => { seek(player.s.chapters[d.v].start); return true; },
@@ -623,7 +662,8 @@ document.addEventListener('click', e => {
   if (t && !act[t.dataset.act](t.dataset)) render();
 });
 document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
-document.addEventListener('change', e => { if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
+document.addEventListener('change', e => {
+  if (e.target.id === 'pb-sleep') { state.pb.sleep = e.target.value === 'chapter' ? 'chapter' : +e.target.value; savePb(); } if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
   if (e.target.id === 'pp-seek') { barFill(e); document.getElementById('pp-t0').textContent = clock(e.target.value); }
   if (e.target.id === 'dllimit' && +e.target.value > 0) { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); }
@@ -634,13 +674,12 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
-// space toggles play/pause, unless the key belongs to what has focus (typing, or a button/link that space already activates)
+// space toggles play/pause and the arrow keys skip, unless the key belongs to what has focus (typing, a list, a slider, or a button that space already activates)
 document.addEventListener('keydown', e => {
-  if (e.key !== ' ' || e.repeat || !player.s || !audio()) return;
-  const t = e.target;
-  if (t.isContentEditable || t.closest('textarea, select, button, a, input:not([type=range])')) return;
-  e.preventDefault();
-  ctl.toggle();
+  if (!player.s || !audio()) return;
+  const t = e.target, typing = t.isContentEditable || t.closest('textarea, select, input:not([type=range])');
+  if (e.key === ' ' && !e.repeat && !typing && !t.closest('button, a')) { e.preventDefault(); ctl.toggle(); }
+  else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !typing && !t.matches('input[type=range]')) { e.preventDefault(); ctl[e.key === 'ArrowLeft' ? 'back' : 'fwd'](); }
 });
 window.addEventListener('hashchange', render);
 render();
