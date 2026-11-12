@@ -2,7 +2,7 @@
 // Everything the OS provides is injected (fetch, fs, storage) so the queue can be tested without Tauri.
 // Files come down in Range chunks and the byte count is saved as it grows, so a cancelled or crashed download resumes where it stopped.
 // shortcut: the manifest lives in localStorage; move it to a file if the queue ever holds hundreds of books.
-function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChange, chunk = 8 * 1024 * 1024 }) {
+function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChange, onDone, chunk = 8 * 1024 * 1024 }) {
   // cfg() -> { root, abs, limit }: where new downloads go (abs: an absolute folder instead of one under the app data dir) and the byte cap (0 = none)
   const items = load() ?? {};
   let current = null, paused = false, ctl = null;
@@ -56,6 +56,7 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
         t.done = true; persist();
       }
       it.status = 'done';
+      onDone?.(it.id);
     } catch (e) {
       if (items[it.id] !== it) { /* removed while downloading */ }
       else if (paused) it.status = 'queued';

@@ -141,7 +141,7 @@ const dl = T?.fs ? makeDownloads({
   fetchFn: tfetch, fs: T.fs, base: T.path.BaseDirectory.AppData, api: () => client(),
   cfg: () => ({ root: state.dlcfg.dir ?? 'downloads', abs: !!state.dlcfg.dir, limit: state.dlcfg.limitGB * 1e9 }),
   urlFor: async (f, abs) => T.core.convertFileSrc(abs ? f : await T.path.join(appData, f)),
-  load: () => store.get('downloads', null), save: v => store.set('downloads', v),
+  load: () => store.get('downloads', null), save: v => store.set('downloads', v), onDone: id => swapToLocal(id),
   onChange: () => { repaint ??= setTimeout(() => { repaint = null; paintDownloads(); }, 300); }
 }) : null;
 
@@ -308,11 +308,27 @@ const PL = {
 
 function syncPlayer(close = false) {
   if (!player.s) return;
-  // shortcut: offline plays only remember their place on this computer, not on the server
-  if (!player.s.sessionId) { store.set('pos.' + player.id, position()); return; }
+  // a local copy has no streaming session: remember the place here and, if the server is reachable, there too
+  if (!player.s.sessionId) {
+    store.set('pos.' + player.id, position());
+    player.listened = 0;
+    return state.session ? client().saveProgress(player.id, position(), player.s.duration).catch(() => {}) : undefined;
+  }
   const body = { currentTime: position(), timeListened: Math.round(player.listened), duration: player.s.duration };
   player.listened = 0;
   return client().sync(player.s.sessionId, body, close).catch(() => {});
+}
+// a book that was streaming while it downloaded moves to the local copy, at the same spot, once it is complete
+async function swapToLocal(id) {
+  const s = player.s;
+  if (player.id !== id || !s?.sessionId || !audio()) return;
+  const local = await dl.session(id, 0), a = audio(), pos = position(), playing = !a.paused;
+  if (!local || player.s !== s) return;
+  await syncPlayer(true); // closes the streaming session
+  s.sessionId = null; s.tracks = local.tracks;
+  player.i = trackAt(s, pos); player.last = 0;
+  a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, pos - s.tracks[player.i].start); if (playing) a.play(); }, { once: true });
+  a.src = s.tracks[player.i].url;
 }
 function stopPlayer() {
   if (player.s && audio()) syncPlayer(true);
@@ -387,7 +403,10 @@ async function startPlayer({ v: id, t: title, a: author }) {
   el.innerHTML = `<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted" id="np-status">Loading…</div></div>`;
   const status = m => { const n = document.getElementById('np-status'); if (n) n.textContent = m; };
   try {
-    const s = (await dl?.session(id, store.get('pos.' + id, 0))) ?? await client().play(id);
+    // from the local copy when it is complete, otherwise streamed; a copy resumes from the server's position when it can be reached
+    const local = dl && await dl.session(id, store.get('pos.' + id, 0));
+    if (local && state.session) local.start = await client().position(id).catch(() => local.start);
+    const s = local ?? await client().play(id);
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
