@@ -253,7 +253,7 @@ views.player = async () => {
   return `${back}<div class="pp">
 <section class="pp-main"><div class="cover pp-cover" style="background:${tint(s.title)}">${esc(s.title)}<img class="cover-img" src="${esc(client().coverUrl(player.id))}" alt=""></div>
 <div class="col g4"><h1>${esc(s.title)}</h1><div class="muted">${esc(s.author)}</div><div class="muted" id="pp-sub"></div></div>
-<div class="col g8"><input type="range" class="pp-seek" id="pp-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book"><div class="row cap muted" style="flex-wrap:nowrap"><span id="pp-t0"></span><span id="pp-t1"></span></div></div>
+<div class="col g8"><input type="range" class="pp-seek" id="pp-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter"><div class="row cap muted" style="flex-wrap:nowrap"><span id="pp-t0"></span><span id="pp-t1"></span></div></div>
 <div class="pp-ctl">${pk('prev', 'Previous chapter', svg(PL.prev, 24))}${pk('back', 'Back 15 seconds', skipIcon(15, true))}${pk('toggle', 'Pause', svg(PL.pause, 28), 'main big')}${pk('fwd', 'Forward 30 seconds', skipIcon(30, false))}${pk('next', 'Next chapter', svg(PL.next, 24))}</div>
 <div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div></section>
 ${s.chapters.length ? `<section class="col g12 pp-side"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
@@ -439,13 +439,30 @@ const ctl = {
   }
 };
 
+function chapterSpan() {
+  const s = player.s, t = position(), c = chapterAt(s, t);
+  const start = c >= 0 ? s.chapters[c].start : 0;
+  const end = c >= 0 ? s.chapters[c].end ?? s.chapters[c + 1]?.start ?? s.duration : s.duration;
+  return { t, c, start, end: Math.max(end, start + 1) };
+}
+// the seek bars show the current chapter: 0 is its start, max its length; dataset.start turns a bar value back into book time
+function paintSeek(sk, { t, start, end }) {
+  sk.max = Math.floor(end - start);
+  sk.value = Math.floor(t - start);
+  sk.dataset.start = start;
+  sk.style.setProperty('--p', (t - start) / (end - start) * 100 + '%');
+}
+const barFill = e => e.target.style.setProperty('--p', e.target.value / (e.target.max || 1) * 100 + '%');
+
 function paintPage(first = false) {
   const s = player.s, a = audio(), sk = document.getElementById('pp-seek');
   if (!s || !a || !sk) return;
-  const t = position(), c = chapterAt(s, t);
-  if (!sk.matches(':active')) { sk.value = Math.floor(t); sk.style.setProperty('--p', (s.duration ? t / s.duration * 100 : 0) + '%'); }
-  document.getElementById('pp-t0').textContent = clock(t);
-  document.getElementById('pp-t1').textContent = '-' + clock(s.duration - t);
+  const sp = chapterSpan(), { t, c } = sp;
+  if (!sk.matches(':active')) {
+    paintSeek(sk, sp);
+    document.getElementById('pp-t0').textContent = clock(t - sp.start);
+  }
+  document.getElementById('pp-t1').textContent = '-' + clock(sp.end - t);
   document.getElementById('pp-sub').textContent = (c >= 0 ? `Chapter ${c + 1} of ${s.chapters.length} · ` : '') + len(Math.max(0, s.duration - t)) + ' left';
   const tg = document.getElementById('pp-toggle');
   tg.innerHTML = svg(a.paused ? PL.play : PL.pause, 28);
@@ -458,11 +475,9 @@ function paintPage(first = false) {
 function paintPlayer() {
   const s = player.s, a = audio();
   if (!s || !a) return;
-  const t = position(), c = chapterAt(s, t);
-  const sk = document.getElementById('np-seek');
-  sk.value = Math.floor(t);
-  sk.style.setProperty('--p', (s.duration ? t / s.duration * 100 : 0) + '%');
-  document.getElementById('np-time').textContent = `${clock(t)} / ${clock(s.duration)}`;
+  const sp = chapterSpan(), { t, c } = sp;
+  paintSeek(document.getElementById('np-seek'), sp);
+  document.getElementById('np-time').textContent = `${clock(t - sp.start)} / ${clock(sp.end - sp.start)}`;
   document.getElementById('np-chap').textContent = c >= 0 ? s.chapters[c].title + ' · ' : ''; // the chapter being played, ahead of the author
   document.querySelectorAll('#np-menu [data-ch]').forEach((b, i) => i === c ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current'));
   document.getElementById('np-toggle').innerHTML = svg(a.paused ? PL.play : PL.pause, 24);
@@ -491,7 +506,7 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     s.author = author; s.title = title;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
-    el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book">
+    el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter">
 <a class="ib" href="#/player" id="np-open" aria-label="Open player">${svg('<path d="m6 15 6-6 6 6"/>', 24)}</a>
 <div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-chap"></span><span id="np-time"></span><span id="np-status"></span></div></div>
 <div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
@@ -525,8 +540,8 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       const rt = e.target.closest('[data-rate]');
       if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(); } else if (rt) { ctl.rate(+rt.dataset.rate); toggleMenu(); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();
     };
-    el.querySelector('#np-seek').oninput = e => { e.target.style.setProperty('--p', (s.duration ? e.target.value / s.duration * 100 : 0) + '%'); document.getElementById('np-time').textContent = `${clock(e.target.value)} / ${clock(s.duration)}`; };
-    el.querySelector('#np-seek').onchange = e => seek(+e.target.value);
+    el.querySelector('#np-seek').oninput = e => { barFill(e); document.getElementById('np-time').textContent = `${clock(e.target.value)} / ${clock(e.target.max)}`; };
+    el.querySelector('#np-seek').onchange = e => seek(+e.target.dataset.start + +e.target.value);
     document.onclick = e => { if (!e.target.closest('.chap')) toggleMenu(); };
     el.onkeydown = e => { if (e.key === 'Escape') { toggleMenu(); e.target.closest('.chap')?.querySelector('[aria-haspopup]')?.focus(); } };
     paintPlayer();
@@ -608,9 +623,9 @@ document.addEventListener('click', e => {
   if (t && !act[t.dataset.act](t.dataset)) render();
 });
 document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
-document.addEventListener('change', e => { if (e.target.id === 'pp-seek') seek(+e.target.value); });
+document.addEventListener('change', e => { if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
-  if (e.target.id === 'pp-seek') { const t = +e.target.value; e.target.style.setProperty('--p', (player.s.duration ? t / player.s.duration * 100 : 0) + '%'); document.getElementById('pp-t0').textContent = clock(t); }
+  if (e.target.id === 'pp-seek') { barFill(e); document.getElementById('pp-t0').textContent = clock(e.target.value); }
   if (e.target.id === 'dllimit' && +e.target.value > 0) { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); }
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
