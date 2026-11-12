@@ -371,6 +371,9 @@ function toggleMenu(open) {
   if (!m) return;
   m.hidden = !(open ?? m.hidden);
   b.setAttribute('aria-expanded', String(!m.hidden));
+  // keep the menu inside the window: slide it left when it would run past the right edge
+  m.style.left = '0px';
+  if (!m.hidden) { const r = m.getBoundingClientRect(); m.style.left = Math.min(0, innerWidth - 16 - r.right) + 'px'; }
   // scroll the menu itself; scrollIntoView would also scroll the page behind the player
   const cur = m.querySelector('[aria-current]');
   if (!m.hidden && cur) m.scrollTop = cur.offsetTop - (m.clientHeight - cur.offsetHeight) / 2;
