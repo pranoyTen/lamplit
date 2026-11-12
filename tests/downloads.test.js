@@ -126,3 +126,16 @@ test('a file shorter than the saved byte count resumes from its real end, leavin
   assert.equal(dl.get('b1').status, 'done');
   assert.deepEqual(files['downloads/b1/0.mp3'], [1, 2, 3, 4, 5]);
 });
+
+test('onDone fires once when a book finishes', async () => {
+  const { fetchFn } = server(DATA);
+  const done = [];
+  const files = {};
+  const fs = { mkdir: async () => {}, open: async p => ({ seek: async () => {}, write: async () => {}, close: async () => {} }), remove: async () => {}, stat: async () => ({ size: 1e9 }) };
+  const api = () => ({ item: async () => ({ duration: 10, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: 5, duration: 10, start: 0 }] }) });
+  const d = makeDownloads({ fetchFn, fs, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit: 0 }), api, urlFor: async f => f, load: () => null, save: () => {}, onDone: id => done.push(id), chunk: 4 });
+  void files;
+  d.add({ id: 'b1', title: 'X', author: 'A' });
+  await settled(d);
+  assert.deepEqual(done, ['b1']);
+});
