@@ -1,7 +1,8 @@
 // Offline downloads: a queue that saves each book's audio files to the app data folder, one book at a time.
 // Everything the OS provides is injected (fetch, fs, storage) so the queue can be tested without Tauri.
-// shortcut: the manifest lives in localStorage and an interrupted file restarts from zero; move to a file and use Range requests if books get huge.
-function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChange }) {
+// Files come down in Range chunks and the byte count is saved as it grows, so a cancelled or crashed download resumes where it stopped.
+// shortcut: the manifest lives in localStorage; move it to a file if the queue ever holds hundreds of books.
+function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChange, chunk = 8 * 1024 * 1024 }) {
   // cfg() -> { root, abs, limit }: where new downloads go (abs: an absolute folder instead of one under the app data dir) and the byte cap (0 = none)
   const items = load() ?? {};
   let current = null, paused = false, ctl = null;
@@ -25,18 +26,26 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
       }
       await fs.mkdir(dir(it), { ...opt(it), recursive: true });
       for (const t of it.tracks.filter(t => !t.done)) {
-        it.bytes -= t.got; t.got = 0;
-        ctl = new AbortController();
-        const res = await fetchFn(t.url, { signal: ctl.signal });
-        if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
-        const f = await fs.open(t.file, { write: true, create: true, truncate: true, ...opt(it) });
-        try {
-          const reader = res.body.getReader();
-          for (let r = await reader.read(); !r.done; r = await reader.read()) {
-            await f.write(r.value);
-            t.got += r.value.length; it.bytes += r.value.length; notify();
-          }
-        } finally { await f.close(); }
+        // whole-file mode: the size is unknown, or the server ignored Range and sent everything
+        let whole = !t.size;
+        while (whole || t.got < t.size) {
+          ctl = new AbortController();
+          const res = await fetchFn(t.url, { signal: ctl.signal, ...(!whole && { headers: { Range: `bytes=${t.got}-${Math.min(t.got + chunk, t.size) - 1}` } }) });
+          if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
+          if (!whole && res.status === 200) { whole = true; it.bytes -= t.got; t.got = 0; }
+          const before = t.got;
+          const f = await fs.open(t.file, { write: true, create: true, truncate: t.got === 0, ...opt(it) });
+          try {
+            if (t.got > 0) await f.seek(t.got, 0); // 0 = from the start; overwrites any bytes written after the last save
+            const reader = res.body.getReader();
+            for (let r = await reader.read(); !r.done; r = await reader.read()) {
+              await f.write(r.value);
+              t.got += r.value.length; it.bytes += r.value.length; notify();
+            }
+          } finally { await f.close(); persist(); } // saved even when cancelled, so the next run starts at t.got
+          if (whole) { t.size = t.got; break; }
+          if (t.got === before) throw new Error('The server sent no data');
+        }
         t.done = true; persist();
       }
       it.status = 'done';
