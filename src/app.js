@@ -125,10 +125,10 @@ ${a.error ? `<div role="alert" class="danger" style="padding:12px 0;border-top:1
   const libs = s && state.libs?.length
     ? `<section class="col g12"><h2>Libraries</h2><div class="card panel">${state.libs.map(l => {
       const on = !state.hidden.includes(l.id);
-      return setrow(esc(l.name), on ? 'Shown in the sidebar and on Home' : 'Hidden', 'sl-' + esc(l.id), `<input type="checkbox" id="sl-${esc(l.id)}" data-act="togglelib" data-v="${esc(l.id)}"${on ? ' checked' : ''}${on && shown().length < 2 ? ' disabled' : ''}>`);
+      return setrow(esc(l.name), on ? (shown().length < 2 ? 'Shown in the sidebar and on Home. At least one library stays on' : 'Shown in the sidebar and on Home') : 'Hidden', 'sl-' + esc(l.id), `<input type="checkbox" id="sl-${esc(l.id)}" data-act="togglelib" data-v="${esc(l.id)}"${on ? ' checked' : ''}${on && shown().length < 2 ? ' disabled' : ''}>`);
     }).join('')}</div></section>` : '';
-  const dls = dl ? `<section class="col g12"><h2>Downloads</h2><div class="card panel">${setrow('Storage limit', `${bytes(dl.bytes())} used. New downloads that would pass the limit are refused`, 'dllimit', `<div class="row g8" style="align-items:center"><input id="dllimit" type="number" min="1" step="1" value="${state.dlcfg.limitGB}" style="width:96px"><span class="muted">GB</span></div>`)}
-${setrow('Download location', `${esc(state.dlcfg.dir ?? 'The Lectern app data folder (default)')}. Changing it only affects new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}</div></section>` : '';
+  const dls = dl ? `<section class="col g12"><h2>Downloads</h2><div class="card panel">${setrow('Storage limit', `${bytes(dl.bytes())} used. Books that would pass it are not downloaded`, 'dllimit', `<div class="row g8" style="align-items:center"><input id="dllimit" type="number" min="1" step="1" value="${state.dlcfg.limitGB}" style="width:96px"><span class="muted">GB</span></div>`)}
+${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}</div></section>` : '';
   return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${dls}</div>`;
 };
 
@@ -169,7 +169,7 @@ const downloadsHtml = () => {
   return `<div class="row"><div class="col g4"><h1>Downloads</h1><div class="muted">${bytes(dl.bytes())} on this computer · ${done} ${done === 1 ? 'book' : 'books'} ready offline</div></div>
 <div class="row g12" style="flex-wrap:nowrap"><button class="btn" data-act="dlpause">${dl.paused ? 'Resume all' : 'Pause all'}</button><button class="btn" data-act="dlclean"${done ? '' : ' disabled'}>Remove finished books</button></div></div>
 ${state.dlcfg.limitGB ? `<section class="col g8" style="max-width:720px"><div class="row" style="flex-wrap:nowrap"><span class="strong">Offline storage</span><span class="muted">${bytes(dl.bytes())} of ${state.dlcfg.limitGB} GB limit</span></div><div class="bar" role="progressbar" aria-label="Offline storage used" aria-valuenow="${Math.min(100, Math.round(dl.bytes() / (state.dlcfg.limitGB * 1e9) * 100))}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.min(100, dl.bytes() / (state.dlcfg.limitGB * 1e9) * 100)}%"></i></div></section>` : ''}
-<section class="col g12" style="max-width:960px"><h2>Queue</h2>${all.length ? `<ul class="card dl">${all.map(dlRow).join('')}</ul>` : '<p class="muted">Nothing downloaded yet. Use Download under any book to save it for offline listening.</p>'}</section>`;
+<section class="col g12" style="max-width:960px"><h2>Queue</h2>${all.length ? `<ul class="card dl">${all.map(dlRow).join('')}</ul>` : '<div class="col g4"><div class="strong">Nothing downloaded yet</div><div class="cap muted">Use Download under a book to save it for offline listening</div></div>'}</section>`;
 };
 function paintDownloads() {
   const m = document.getElementById('dlpage');
@@ -177,7 +177,7 @@ function paintDownloads() {
 }
 views.downloads = async () => dl
   ? `<div id="dlpage" class="col" style="gap:24px">${downloadsHtml()}</div>`
-  : '<h1>Downloads</h1><p class="muted">Offline downloads need the Lectern desktop app.</p>';
+  : '<h1>Downloads</h1><p class="muted">Offline downloads need the Lectern desktop app</p>';
 
 // ---- book details: everything the server knows about one book, plus play and download ----
 const playLabel = id => { const c = coverCls(id); return c.includes('playing') ? 'Pause' : c.includes('now') ? 'Resume' : 'Play'; };
@@ -186,7 +186,7 @@ views.book = async id => {
   const meta = `data-v="${esc(id)}" data-t="${esc(b.title)}" data-a="${esc(authors)}"`;
   const facts = [['Narrated by', b.narrators.join(', ')], ['Length', b.duration ? len(b.duration) : ''], ['Chapters', b.chapters || ''], ['Published', [b.publisher, b.year].filter(Boolean).join(', ')], ['Language', b.language], ['Genres', b.genres.join(', ')], ['Size', b.size ? bytes(b.size) : '']].filter(([, v]) => v);
   const text = b.description.replace(/<\/?(p|div|br)[^>]*>/gi, '\n').replace(/<[^>]+>/g, '').trim();
-  return `<div><button class="lnk" data-act="back">Back</button></div>
+  return `<div><button class="lnk back" data-act="back">${svg('<path d="M15 6l-6 6 6 6"/>', 16)}Back</button></div>
 <div class="row" style="align-items:flex-start;justify-content:flex-start;gap:32px">
 <div style="width:240px;max-width:100%;flex:none"><div class="cover" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(id))}" alt=""></div></div>
 <div class="col g16" style="flex:1 1 360px;min-width:0;max-width:720px">
@@ -218,8 +218,8 @@ function statsHtml() {
 <figure class="chart" role="img" aria-label="Bar chart of time listened. ${s.bars.map(b => b.label + ' ' + val(b.secs)).join(', ')}" style="gap:${few ? 12 : 4}px">${s.bars.map((b, i) => `<div class="barcol" title="${esc(b.label)}: ${val(b.secs)}">${few ? `<div class="cap strong">${val(b.secs)}</div>` : ''}<div style="width:100%;height:${Math.max(b.secs ? 2 : 0, Math.round(b.secs / max * 196))}px;background:${i === s.bars.length - 1 ? 'var(--accent)' : 'var(--track)'};border-radius:4px 4px 0 0"></div></div>`).join('')}</figure>
 <div aria-hidden="true" class="chart-x" style="gap:${few ? 12 : 4}px">${s.bars.map(b => `<div class="cap muted">${esc(b.label)}</div>`).join('')}</div></section>
 <div class="row" style="align-items:flex-start;justify-content:flex-start;gap:24px">
-<section class="col g12" style="flex:1 1 360px;min-width:0"><h2>Most listened authors</h2>${s.authors.length ? `<ul class="plain col g12">${s.authors.map(a => `<li class="col g4"><div class="row" style="flex-wrap:nowrap"><span class="strong">${esc(a.name)}</span><span class="muted">${hrs(a.secs)}</span></div><div class="bar"><i style="width:${Math.round(a.secs / top * 100)}%"></i></div></li>`).join('')}</ul>` : '<p class="muted">No listening yet</p>'}</section>
-<section class="col g12" style="flex:1 1 360px;min-width:0"><h2>Recently finished</h2>${d.recent.length ? `<ul class="plain fin">${d.recent.map(f => `<li><div class="dcov" style="width:40px;height:40px;background:${tint(f.title)}"><img class="cover-img" src="${esc(client().coverUrl(f.id))}" alt="" loading="lazy"></div><a class="col btxt" href="#/book/${esc(f.id)}" style="flex:1;min-width:0"><span class="strong">${esc(f.title)}</span><span class="cap muted">${esc(f.author)}</span></a><span class="cap muted">${shortDate(f.at)}</span></li>`).join('')}</ul>` : '<p class="muted">No finished books yet</p>'}</section></div>`;
+<section class="col g12" style="flex:1 1 360px;min-width:0"><div class="col g4"><h2>Most listened authors</h2><div class="cap muted">All time</div></div>${s.authors.length ? `<ul class="plain col g12">${s.authors.map(a => `<li class="col g4"><div class="row" style="flex-wrap:nowrap"><span class="strong">${esc(a.name)}</span><span class="muted">${hrs(a.secs)}</span></div><div class="bar"><i style="width:${Math.round(a.secs / top * 100)}%"></i></div></li>`).join('')}</ul>` : '<p class="muted">No listening yet</p>'}</section>
+<section class="col g12" style="flex:1 1 360px;min-width:0"><div class="col g4"><h2>Recently finished</h2><div class="cap muted">Latest five</div></div>${d.recent.length ? `<ul class="plain fin">${d.recent.map(f => `<li><div class="dcov" style="width:40px;height:40px;background:${tint(f.title)}"><img class="cover-img" src="${esc(client().coverUrl(f.id))}" alt="" loading="lazy"></div><a class="col btxt" href="#/book/${esc(f.id)}" style="flex:1;min-width:0"><span class="strong">${esc(f.title)}</span><span class="cap muted">${esc(f.author)}</span></a><span class="cap muted">${shortDate(f.at)}</span></li>`).join('')}</ul>` : '<p class="muted">No finished books yet</p>'}</section></div>`;
 }
 views.stats = async () => {
   const api = client(), d = await api.stats();
