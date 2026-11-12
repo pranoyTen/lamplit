@@ -511,6 +511,17 @@ async function preloadLast() {
   if (b && !player.id) startPlayer({ v: b.id, t: b.title, a: b.author }, false);
 }
 
+function confirmBox({ title, message, ok, cancel = 'Keep' }) {
+  const m = document.getElementById('modal');
+  m.innerHTML = `<h2 id="modal-title">${esc(title)}</h2><p class="muted">${esc(message)}</p><div class="mactions"><button type="button" class="btn" data-r="no" autofocus>${esc(cancel)}</button><button type="button" class="btn primary" data-r="yes">${esc(ok)}</button></div>`;
+  m.returnValue = ''; // Escape closes without setting it, so clear the last answer
+  return new Promise(done => {
+    m.onclose = () => done(m.returnValue === 'yes');
+    m.onclick = e => { const r = e.target.closest('[data-r]')?.dataset.r; if (r) m.close(r); else if (e.target === m) m.close('no'); };
+    m.showModal();
+  });
+}
+
 const act = {
   // same book: toggle pause; another book: start it; ignored while the session is still opening
   play: d => { if (player.id !== d.v) startPlayer(d); else if (player.s) ctl.toggle(); return true; },
@@ -544,7 +555,9 @@ const act = {
   dlretry: d => { dl.retry(d.v); paintDownloads(); return true; },
   dlremove: async d => {
     const it = dl.get(d.v), done = it?.status === 'done';
-    const ok = await T.dialog.ask(done ? `Remove "${it.title}" from this computer? You can download it again later.` : `Cancel the download of "${it?.title}" and delete what was saved so far?`, { title: done ? 'Remove download' : 'Cancel download', kind: 'warning', okLabel: done ? 'Remove' : 'Cancel download', cancelLabel: 'Keep' });
+    const ok = await confirmBox(done
+      ? { title: 'Remove download', message: `Remove "${it.title}" from this computer? You can download it again later.`, ok: 'Remove' }
+      : { title: 'Cancel download', message: `Cancel the download of "${it?.title}" and delete what was saved so far?`, ok: 'Cancel download' });
     if (ok) await dl.remove(d.v).then(() => location.hash.startsWith('#/book/') ? render() : paintDownloads());
     return true;
   },

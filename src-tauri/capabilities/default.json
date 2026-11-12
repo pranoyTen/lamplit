@@ -19,7 +19,6 @@
     "fs:allow-mkdir",
     "fs:allow-remove",
     "dialog:allow-open",
-    "dialog:allow-ask",
     { "identifier": "fs:scope", "allow": [{ "path": "$APPDATA/downloads" }, { "path": "$APPDATA/downloads/**" }] }
   ]
 }
