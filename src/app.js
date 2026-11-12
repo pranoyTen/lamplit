@@ -134,6 +134,19 @@ ${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder
 
 // ---- downloads: offline copies in the app data folder (desktop app only) ----
 const T = window.__TAURI__;
+// the window has no system title bar (decorations are off), so the app draws its own: drag area plus minimize, maximize, close
+if (T?.window) {
+  const w = T.window.getCurrentWindow(), bar = document.getElementById('titlebar');
+  const WIN = { min: '<path d="M6 12h12"/>', max: '<rect x="6" y="6" width="12" height="12" rx="1"/>', restore: '<path d="M9 9V6h9v9h-3"/><rect x="6" y="9" width="9" height="9" rx="1"/>', close: '<path d="M6 6l12 12M18 6 6 18"/>' };
+  const btn = (k, label) => `<button class="wbtn${k === 'close' ? ' close' : ''}" data-w="${k}" aria-label="${label}">${svg(WIN[k], 16)}</button>`;
+  bar.innerHTML = `<span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>${btn('min', 'Minimize')}<button class="wbtn" data-w="max" id="wmax" aria-label="Maximize"></button>${btn('close', 'Close')}`;
+  bar.hidden = false;
+  bar.setAttribute('data-tauri-drag-region', '');
+  const paintMax = async () => { const m = await w.isMaximized(); const b = document.getElementById('wmax'); b.innerHTML = svg(m ? WIN.restore : WIN.max, 16); b.setAttribute('aria-label', m ? 'Restore' : 'Maximize'); };
+  bar.onclick = e => { const k = e.target.closest('[data-w]')?.dataset.w; if (k === 'min') w.minimize(); else if (k === 'max') w.toggleMaximize(); else if (k === 'close') w.close(); };
+  paintMax();
+  w.onResized(paintMax);
+}
 let appData = '';
 T?.path?.appDataDir().then(p => { appData = p; });
 let repaint = null;
@@ -280,6 +293,7 @@ async function signIn() {
   try {
     state.session = await absClient(tfetch, { server: a.address }).login(a.username.trim(), a.password);
     store.set('session', state.session);
+    preloadLast();
     a.password = '';
     location.hash = '#/home';
   } catch (e) {
@@ -294,8 +308,8 @@ async function signIn() {
 
 // ---- player: lives outside #app so re-renders never interrupt playback ----
 // All times below are seconds from the start of the book; a book may be split over several files (tracks).
-const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1 };
-const RATES = [1, 1.25, 1.5, 1.75, 2, 0.75];
+const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false };
+const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const audio = () => document.getElementById('audio');
 const position = () => player.s.tracks[player.i].start + audio().currentTime;
 const clock = t => { t = Math.max(0, Math.floor(t)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
@@ -303,29 +317,34 @@ const skipIcon = (n, back) => svg(`<path d="${back ? 'M4 12a8 8 0 1 1 2.5 5.8M4 
 const PL = {
   prev: '<path d="M6 5v14M19 5 9 12l10 7z"/>', next: '<path d="M18 5v14M5 5l10 7-10 7z"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+  vol: '<path d="M4 9v6h4l5 4V5L8 9zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>', mute: '<path d="M4 9v6h4l5 4V5L8 9zM17 9l5 6M22 9l-5 6"/>',
   play: '<path d="M8 5v14l11-7z" fill="currentColor"/>', pause: '<path d="M8 5v14M16 5v14" stroke-width="2.5"/>'
 };
 
-function syncPlayer(close = false) {
+// listening queued while the server was out of reach; each book is replayed as one short server session
+const listenQ = makeListenQueue({
+  load: () => store.get('listenq', null), save: v => store.set('listenq', v),
+  send: async (id, e) => { const s = await client().play(id); await client().sync(s.sessionId, { currentTime: e.currentTime, timeListened: Math.round(e.timeListened), duration: e.duration }, true); }
+});
+const flushListening = () => state.session && listenQ.size() ? listenQ.flush(player.id) : undefined;
+window.addEventListener('online', flushListening);
+function syncPlayer(close = false, queueOnly = false) {
   if (!player.s) return;
-  // a local copy has no streaming session: remember the place here and, if the server is reachable, there too
-  if (!player.s.sessionId) {
-    store.set('pos.' + player.id, position());
-    player.listened = 0;
-    return state.session ? client().saveProgress(player.id, position(), player.s.duration).catch(() => {}) : undefined;
-  }
-  const body = { currentTime: position(), timeListened: Math.round(player.listened), duration: player.s.duration };
+  store.set('pos.' + player.id, position()); // the place is always kept here too, for offline starts
+  const { sessionId, duration } = player.s, body = { currentTime: position(), timeListened: Math.round(player.listened), duration };
   player.listened = 0;
-  return client().sync(player.s.sessionId, body, close).catch(() => {});
+  // no session (server was unreachable at start), a dead one, or leaving the app: keep the time queued, it is sent when the server answers
+  const keep = () => listenQ.add(player.id, body);
+  if (!sessionId || queueOnly) { keep(); return queueOnly ? undefined : flushListening(); }
+  return client().sync(sessionId, body, close).then(flushListening, keep);
 }
 // a book that was streaming while it downloaded moves to the local copy, at the same spot, once it is complete
 async function swapToLocal(id) {
   const s = player.s;
-  if (player.id !== id || !s?.sessionId || !audio()) return;
+  if (player.id !== id || s?.local || !audio()) return;
   const local = await dl.session(id, 0), a = audio(), pos = position(), playing = !a.paused;
   if (!local || player.s !== s) return;
-  await syncPlayer(true); // closes the streaming session
-  s.sessionId = null; s.tracks = local.tracks;
+  s.local = true; s.tracks = local.tracks; // the server session stays open, only the audio source changes
   player.i = trackAt(s, pos); player.last = 0;
   a.addEventListener('loadedmetadata', () => { a.currentTime = Math.max(0, pos - s.tracks[player.i].start); if (playing) a.play(); }, { once: true });
   a.src = s.tracks[player.i].url;
@@ -364,22 +383,43 @@ function chapterStep(dir) {
   if (dir > 0) { if (s.chapters[c + 1]) seek(s.chapters[c + 1].start); }
   else seek(t - s.chapters[c].start > 3 || !s.chapters[c - 1] ? s.chapters[c].start : s.chapters[c - 1].start);
 }
-function toggleMenu(open) {
-  const m = document.getElementById('np-menu'), b = document.getElementById('np-chapbtn');
-  if (!m) return;
-  m.hidden = !(open ?? m.hidden);
-  b.setAttribute('aria-expanded', String(!m.hidden));
-  if (!m.hidden) m.querySelector('[aria-current]')?.scrollIntoView({ block: 'center' });
+// two popover menus share one open/close routine: opening one closes the other, no argument closes both
+const MENUS = { chap: ['np-menu', 'np-chapbtn'], speed: ['np-smenu', 'np-rate'] };
+function toggleMenu(which, open) {
+  for (const [k, [menuId, btnId]] of Object.entries(MENUS)) {
+    const m = document.getElementById(menuId), b = document.getElementById(btnId);
+    if (!m) continue;
+    m.hidden = k === which ? !(open ?? m.hidden) : true;
+    b.setAttribute('aria-expanded', String(!m.hidden));
+    // keep the menu inside the window: slide it left when it would run past the right edge
+    m.style.left = '0px';
+    if (m.hidden) continue;
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.min(0, innerWidth - 16 - r.right) + 'px';
+    // scroll the menu itself; scrollIntoView would also scroll the page behind the player
+    const cur = m.querySelector('[aria-current]');
+    if (cur) m.scrollTop = cur.offsetTop - (m.clientHeight - cur.offsetHeight) / 2;
+  }
+}
+function paintVolume() {
+  const a = audio(), off = player.muted || player.vol === 0;
+  if (a) a.volume = player.vol, a.muted = off;
+  const b = document.getElementById('np-mute'), r = document.getElementById('np-vol');
+  if (b) { b.innerHTML = svg(off ? PL.mute : PL.vol, 24); b.setAttribute('aria-label', off ? 'Unmute' : 'Mute'); }
+  if (r) r.value = off ? 0 : player.vol;
 }
 const ctl = {
-  chapters: () => toggleMenu(),
+  mute: () => { player.muted = !player.muted; if (!player.muted && player.vol === 0) player.vol = 0.5; paintVolume(); },
+  chapters: () => toggleMenu('chap'),
+  speed: () => toggleMenu('speed'),
   prev: () => chapterStep(-1), next: () => chapterStep(1),
   back: () => seek(position() - 15), fwd: () => seek(position() + 30),
   toggle: () => { const a = audio(); a.paused ? a.play() : a.pause(); },
-  rate: () => {
-    player.rate = RATES[(RATES.indexOf(player.rate) + 1) % RATES.length];
-    audio().defaultPlaybackRate = audio().playbackRate = player.rate;
-    document.getElementById('np-rate').textContent = player.rate + '×';
+  rate: r => {
+    player.rate = r;
+    audio().defaultPlaybackRate = audio().playbackRate = r;
+    document.getElementById('np-rate').textContent = r + '×';
+    document.querySelectorAll('#np-smenu [data-rate]').forEach(b => +b.dataset.rate === r ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current'));
   }
 };
 
@@ -387,7 +427,9 @@ function paintPlayer() {
   const s = player.s, a = audio();
   if (!s || !a) return;
   const t = position(), c = chapterAt(s, t);
-  document.getElementById('np-seek').value = Math.floor(t);
+  const sk = document.getElementById('np-seek');
+  sk.value = Math.floor(t);
+  sk.style.setProperty('--p', (s.duration ? t / s.duration * 100 : 0) + '%');
   document.getElementById('np-time').textContent = `${clock(t)} / ${clock(s.duration)}`;
   document.querySelectorAll('#np-menu [data-ch]').forEach((b, i) => i === c ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current'));
   document.getElementById('np-toggle').innerHTML = svg(a.paused ? PL.play : PL.pause, 24);
@@ -395,7 +437,7 @@ function paintPlayer() {
   paintCovers();
 }
 
-async function startPlayer({ v: id, t: title, a: author }) {
+async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
   stopPlayer();
   player.id = id; paintCovers();
   const el = document.getElementById('player');
@@ -403,21 +445,28 @@ async function startPlayer({ v: id, t: title, a: author }) {
   el.innerHTML = `<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted" id="np-status">Loading…</div></div>`;
   const status = m => { const n = document.getElementById('np-status'); if (n) n.textContent = m; };
   try {
-    // from the local copy when it is complete, otherwise streamed; a copy resumes from the server's position when it can be reached
+    // audio comes from the local copy when it is complete, otherwise from the server. Either way a server session is opened when it can
+    // be reached, so the resume point and the listening stats are the server's. Offline, only the place is remembered here.
     const local = dl && await dl.session(id, store.get('pos.' + id, 0));
-    if (local && state.session) local.start = await client().position(id).catch(() => local.start);
     const s = local ?? await client().play(id);
+    if (local) {
+      const srv = await client().play(id).catch(() => null);
+      Object.assign(local, { local: true, sessionId: srv?.sessionId ?? null, start: srv?.start ?? local.start });
+    }
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
-    el.innerHTML = `<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted" id="np-status">${esc(author)}</div></div>
-<div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<button class="ib txt" data-k="rate" id="np-rate" aria-label="Playback speed">${player.rate}×</button></div>
+    el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book">
+<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-status">${esc(author)}</span> · <span id="np-time"></span></div></div>
+<div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
+<div class="vol"><button class="ib" data-k="mute" id="np-mute"></button><input type="range" id="np-vol" min="0" max="1" step="0.05" aria-label="Volume"></div>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
-<div class="np-seek"><span class="cap muted" id="np-time"></span><input type="range" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book"></div>
-<audio id="audio" autoplay src="${esc(s.tracks[player.i].url)}"></audio>`;
+<audio id="audio"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
     const a = audio();
     a.defaultPlaybackRate = a.playbackRate = player.rate;
+    paintVolume();
+    el.querySelector('#np-vol').oninput = e => { player.vol = +e.target.value; player.muted = false; store.set('vol', player.vol); paintVolume(); };
     a.addEventListener('loadedmetadata', () => { if (player.last === 0 && s.start) a.currentTime = Math.max(0, s.start - s.tracks[player.i].start); }, { once: true });
     a.addEventListener('timeupdate', () => {
       const d = a.currentTime - player.last;
@@ -431,28 +480,32 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     a.addEventListener('ended', () => {
       if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else syncPlayer();
     });
-    a.addEventListener('error', async () => {
-      // say why: a blocked or missing file and an undecodable one look the same to <audio>
-      const u = a.currentSrc || a.src;
-      const r = await fetch(u, { headers: { Range: 'bytes=0-0' } }).catch(e => ({ status: 0, why: String(e) }));
-      const why = r.status ? `HTTP ${r.status}, ${r.headers?.get('content-type') ?? 'no type'}` : r.why;
-      status(`Can't play this file (${a.error?.message || 'code ' + a.error?.code}; ${why})`);
-    });
+    a.addEventListener('error', () => status(`Can't play this file (${a.error?.message || 'code ' + a.error?.code})`));
     el.onclick = e => {
       const ch = e.target.closest('[data-ch]');
-      if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(false); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();
+      const rt = e.target.closest('[data-rate]');
+      if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(); } else if (rt) { ctl.rate(+rt.dataset.rate); toggleMenu(); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();
     };
-    el.querySelector('#np-seek').oninput = e => { document.getElementById('np-time').textContent = `${clock(e.target.value)} / ${clock(s.duration)}`; };
+    el.querySelector('#np-seek').oninput = e => { e.target.style.setProperty('--p', (s.duration ? e.target.value / s.duration * 100 : 0) + '%'); document.getElementById('np-time').textContent = `${clock(e.target.value)} / ${clock(s.duration)}`; };
     el.querySelector('#np-seek').onchange = e => seek(+e.target.value);
-    document.onclick = e => { if (!e.target.closest('.chap')) toggleMenu(false); };
-    el.onkeydown = e => { if (e.key === 'Escape') { toggleMenu(false); document.getElementById('np-chapbtn')?.focus(); } };
+    document.onclick = e => { if (!e.target.closest('.chap')) toggleMenu(); };
+    el.onkeydown = e => { if (e.key === 'Escape') { toggleMenu(); e.target.closest('.chap')?.querySelector('[aria-haspopup]')?.focus(); } };
     paintPlayer();
   } catch (e) {
+    if (!autoplay) return stopPlayer(); // a quiet preload that fails just leaves the player hidden
     player.id = null; paintCovers();
     status(e.status === 401 ? 'Your session expired. Sign in again.' : e.status ? `The server answered ${e.status}.` : "Can't start playback. Check your connection.");
   }
 }
-window.addEventListener('beforeunload', () => syncPlayer());
+window.addEventListener('beforeunload', () => syncPlayer(false, true)); // the page is going away: queue now, send next launch
+// the player is always there when there is something to resume: load the most recent Continue listening book, paused
+// shortcut: this opens a server session without listening to anything yet; harmless, but it shows in the server's session list until closed
+async function preloadLast() {
+  if (!state.session || player.id) return;
+  await flushListening(); // so the server's place below includes what was listened offline
+  const b = (await client().inProgress().catch(() => [])).find(x => !state.hidden.includes(x.libraryId));
+  if (b && !player.id) startPlayer({ v: b.id, t: b.title, a: b.author }, false);
+}
 
 const act = {
   // same book: toggle pause; another book: start it; ignored while the session is still opening
@@ -503,7 +556,16 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
+// space toggles play/pause, unless the key belongs to what has focus (typing, or a button/link that space already activates)
+document.addEventListener('keydown', e => {
+  if (e.key !== ' ' || e.repeat || !player.s || !audio()) return;
+  const t = e.target;
+  if (t.isContentEditable || t.closest('textarea, select, button, a, input:not([type=range])')) return;
+  e.preventDefault();
+  ctl.toggle();
+});
 window.addEventListener('hashchange', render);
 render();
+preloadLast();
 // a chosen folder must be re-allowed on every launch before anything reads or writes it
 if (dl) Promise.all([...new Set([state.dlcfg.dir, ...dl.list().filter(i => i.abs).map(i => i.root)])].filter(Boolean).map(path => T.core.invoke('allow_dir', { path }))).catch(() => {}).finally(() => state.session && dl.pump());

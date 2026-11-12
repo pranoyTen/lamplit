@@ -33,7 +33,7 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
         while (whole || t.got < t.size) {
           // trust the file, not the counter: seeking past the real end would leave a hole of zeros that no player can decode
           if (t.got > 0) {
-            const size = await fs.stat(t.file, opt(it)).then(x => x.size, () => 0);
+            const { size } = await disk(fs.stat(t.file, opt(it)));
             if (size < t.got) { it.bytes -= t.got - size; t.got = size; }
           }
           ctl = new AbortController();
@@ -96,6 +96,8 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
     async session(id, start) {
       const it = items[id];
       if (it?.status !== 'done') return null;
+      // a copy whose files lost bytes cannot play; stream it instead (a hole of zeros inside a right-sized file is not detectable)
+      for (const t of it.tracks) if (await fs.stat(t.file, opt(it)).then(x => x.size, () => -1) !== t.size) return null;
       return { sessionId: null, start, duration: it.duration, chapters: it.chapters, tracks: await Promise.all(it.tracks.map(async t => ({ url: await urlFor(t.file, it.abs), start: t.start, duration: t.duration }))) };
     },
     pump
