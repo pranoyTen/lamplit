@@ -308,15 +308,22 @@ const PL = {
   play: '<path d="M8 5v14l11-7z" fill="currentColor"/>', pause: '<path d="M8 5v14M16 5v14" stroke-width="2.5"/>'
 };
 
-function syncPlayer(close = false) {
+// listening queued while the server was out of reach; each book is replayed as one short server session
+const listenQ = makeListenQueue({
+  load: () => store.get('listenq', null), save: v => store.set('listenq', v),
+  send: async (id, e) => { const s = await client().play(id); await client().sync(s.sessionId, { currentTime: e.currentTime, timeListened: Math.round(e.timeListened), duration: e.duration }, true); }
+});
+const flushListening = () => state.session && listenQ.size() ? listenQ.flush(player.id) : undefined;
+window.addEventListener('online', flushListening);
+function syncPlayer(close = false, queueOnly = false) {
   if (!player.s) return;
   store.set('pos.' + player.id, position()); // the place is always kept here too, for offline starts
   const { sessionId, duration } = player.s, body = { currentTime: position(), timeListened: Math.round(player.listened), duration };
   player.listened = 0;
-  // no session (server was unreachable at start) or a dead one: write the place directly, listening time of that stretch is not counted
-  // shortcut: offline listening time is lost from the stats, only the position survives; queue it locally if that ever matters
-  const direct = () => client().saveProgress(player.id, body.currentTime, duration);
-  return (sessionId ? client().sync(sessionId, body, close).catch(direct) : state.session ? direct() : Promise.resolve()).catch(() => {});
+  // no session (server was unreachable at start), a dead one, or leaving the app: keep the time queued, it is sent when the server answers
+  const keep = () => listenQ.add(player.id, body);
+  if (!sessionId || queueOnly) { keep(); return queueOnly ? undefined : flushListening(); }
+  return client().sync(sessionId, body, close).then(flushListening, keep);
 }
 // a book that was streaming while it downloaded moves to the local copy, at the same spot, once it is complete
 async function swapToLocal(id) {
@@ -468,11 +475,12 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     status(e.status === 401 ? 'Your session expired. Sign in again.' : e.status ? `The server answered ${e.status}.` : "Can't start playback. Check your connection.");
   }
 }
-window.addEventListener('beforeunload', () => syncPlayer());
+window.addEventListener('beforeunload', () => syncPlayer(false, true)); // the page is going away: queue now, send next launch
 // the player is always there when there is something to resume: load the most recent Continue listening book, paused
 // shortcut: this opens a server session without listening to anything yet; harmless, but it shows in the server's session list until closed
 async function preloadLast() {
   if (!state.session || player.id) return;
+  await flushListening(); // so the server's place below includes what was listened offline
   const b = (await client().inProgress().catch(() => [])).find(x => !state.hidden.includes(x.libraryId));
   if (b && !player.id) startPlayer({ v: b.id, t: b.title, a: b.author }, false);
 }
