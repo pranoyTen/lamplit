@@ -4,6 +4,13 @@
   --sans:"Segoe UI Variable Text","Segoe UI",-apple-system,"SF Pro Text",system-ui,sans-serif}
 :root[data-theme=dark]{--s100:#151514;--s200:#1c1c1a;--raised:#252523;--ink:#efede8;--muted:#aaa79f;--hairline:#34332f;--on-brand:#151514;--brand:#e0a951;--accent:#5fc2bb;--track:#34332f;--danger:#f08a73;--focus:#7db4f0;--shadow-card:0 1px 2px rgba(0,0,0,.5)}
 
+/* scrollbars: thin, on the page background, in the neutral ramp (applies to the page and the chapter list) */
+*{scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+@supports not (scrollbar-color:auto){
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:5px;border:2px solid transparent;background-clip:content-box}
+}
 *{box-sizing:border-box}
 body{font-variant-numeric:tabular-nums;margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--s100);color:var(--ink);font:14px/20px var(--sans)}
 a{color:inherit;text-decoration:none}
