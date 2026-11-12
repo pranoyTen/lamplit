@@ -134,6 +134,19 @@ ${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder
 
 // ---- downloads: offline copies in the app data folder (desktop app only) ----
 const T = window.__TAURI__;
+// the window has no system title bar (decorations are off), so the app draws its own: drag area plus minimize, maximize, close
+if (T?.window) {
+  const w = T.window.getCurrentWindow(), bar = document.getElementById('titlebar');
+  const WIN = { min: '<path d="M6 12h12"/>', max: '<rect x="6" y="6" width="12" height="12" rx="1"/>', restore: '<path d="M9 9V6h9v9h-3"/><rect x="6" y="9" width="9" height="9" rx="1"/>', close: '<path d="M6 6l12 12M18 6 6 18"/>' };
+  const btn = (k, label) => `<button class="wbtn${k === 'close' ? ' close' : ''}" data-w="${k}" aria-label="${label}">${svg(WIN[k], 16)}</button>`;
+  bar.innerHTML = `<span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>${btn('min', 'Minimize')}<button class="wbtn" data-w="max" id="wmax" aria-label="Maximize"></button>${btn('close', 'Close')}`;
+  bar.hidden = false;
+  bar.setAttribute('data-tauri-drag-region', '');
+  const paintMax = async () => { const m = await w.isMaximized(); const b = document.getElementById('wmax'); b.innerHTML = svg(m ? WIN.restore : WIN.max, 16); b.setAttribute('aria-label', m ? 'Restore' : 'Maximize'); };
+  bar.onclick = e => { const k = e.target.closest('[data-w]')?.dataset.w; if (k === 'min') w.minimize(); else if (k === 'max') w.toggleMaximize(); else if (k === 'close') w.close(); };
+  paintMax();
+  w.onResized(paintMax);
+}
 let appData = '';
 T?.path?.appDataDir().then(p => { appData = p; });
 let repaint = null;

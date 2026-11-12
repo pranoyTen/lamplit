@@ -18,6 +18,14 @@ p{margin:0}
 .strong{font-weight:500}
 .accent{color:var(--accent)}.danger{color:var(--danger)}
 
+/* window title bar (desktop app only): the same surface and hairline as the sidebar */
+#titlebar{position:sticky;top:0;z-index:30;flex:none;height:36px;display:flex;align-items:stretch;background:var(--s200);border-bottom:1px solid var(--hairline);user-select:none}
+#titlebar[hidden]{display:none}
+.wtitle{align-self:center;padding:0 16px;font:600 13px/16px var(--serif);color:var(--muted);pointer-events:none}
+.wspace{flex:1}
+.wbtn{width:46px;border:0;border-radius:0;background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:default}
+.wbtn:hover{color:var(--ink)}
+.wbtn.close:hover:not(:disabled){background-color:#c42b1c;background-image:none;color:#fff}
 /* layout */
 #app{flex:1;display:flex;flex-direction:column}
 .shell{flex:1;display:flex;flex-wrap:wrap;align-items:stretch}
