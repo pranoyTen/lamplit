@@ -12,7 +12,7 @@ const state = {
   libs: null,
   libId: store.get('lib', null),
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
-  items: [],
+  items: [], q: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
 };
 const client = () => absClient(tfetch, state.session);
@@ -24,6 +24,7 @@ const ICON = {
   home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   library: '<path d="M4 19.5V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2.5zM4 19.5A2 2 0 0 0 6 21h13"/>',
   settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
+  series: '<path d="M5 5h11a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2zM9 3h10a2 2 0 0 1 2 2v12"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   theme: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>'
 };
@@ -31,12 +32,12 @@ const len = s => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60)
 const tint = t => `hsl(${[...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7)} 30% 28%)`;
 const bar = pct => `<div class="bar thin"><i style="width:${Math.round(pct * 100)}%"></i></div>`;
 
-const card = (b, pct) => `<div class="book"><button class="${coverCls(b.id)}" data-act="play" data-v="${esc(b.id)}" data-t="${esc(b.title)}" data-a="${esc(b.author)}" aria-label="Play ${esc(b.title)}" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(b.id))}" alt="" loading="lazy"><span class="ov" aria-hidden="true">${svg(PL.play, 40)}${svg(PL.pause, 40)}</span></button>
-<div class="col" style="gap:2px"><div class="strong">${esc(b.title)}</div><div class="cap muted">${esc(b.author)}${b.duration ? ' · ' + len(b.duration) : ''}</div></div>${pct > 0 && pct < 1 ? bar(pct) : ''}</div>`;
-const grid = (books, pct = {}) => books.map(b => card(b, pct[b.id])).join('') || '<p class="muted">Nothing here yet</p>';
+const card = (b, pct, extra = '') => `<div class="book"><button class="${coverCls(b.id)}" data-act="play" data-v="${esc(b.id)}" data-t="${esc(b.title)}" data-a="${esc(b.author)}" aria-label="Play ${esc(b.title)}" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(b.id))}" alt="" loading="lazy"><span class="ov" aria-hidden="true">${svg(PL.play, 40)}${svg(PL.pause, 40)}</span></button>
+<div class="col" style="gap:2px"><div class="strong">${esc(b.title)}</div><div class="cap muted">${esc(b.author)}${b.duration ? ' · ' + len(b.duration) : ''}</div></div>${pct > 0 && pct < 1 ? bar(pct) : ''}${extra}</div>`;
+const grid = (books, pct = {}, extra = () => '') => books.map(b => card(b, pct[b.id], extra(b))).join('') || '<p class="muted">Nothing here yet</p>';
 
 // ---- views ----
-const NAV = ['home', 'library', 'settings'];
+const NAV = ['home', 'library', 'series', 'settings'];
 const sidebar = route => `<nav aria-label="Main"><div class="logo">Lectern</div>
 <div class="navlinks">${NAV.map(r => `<a href="#/${r}"${r === route ? ' aria-current="page"' : ''}>${svg(ICON[r], 20)}${r[0].toUpperCase() + r.slice(1)}</a>`).join('')}</div>
 ${shown().length ? `<div class="col g8" style="padding:0 8px"><div class="label muted">Libraries</div>${shown().map(l => `<button class="lnk" id="lib-${esc(l.id)}" data-act="lib" data-v="${esc(l.id)}" aria-pressed="${l.id === state.libId}">${esc(l.name)}</button>`).join('')}</div>` : ''}
@@ -57,11 +58,54 @@ ${libs.map((l, i) => `<section class="col g16"><h2>Recently added${libs.length >
 views.library = async () => {
   if (!state.libId) return '<h1>Library</h1><p class="muted">No libraries found on this server</p>';
   const { total, books } = await client().items(state.libId, { limit: 200, sort: 'media.metadata.title' });
-  state.items = books;
+  state.items = books; state.q = '';
   return `<div class="row"><div class="col g4"><h1>${esc(state.libs.find(l => l.id === state.libId)?.name ?? 'Library')}</h1><div class="muted">${total} books${total > books.length ? ` · showing the first ${books.length}` : ''}</div></div>
 <div class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--muted)">${ICON.search}</svg><input id="q" type="search" aria-label="Search this library" placeholder="Search" style="width:240px"></div></div>
-<div class="grid lib" id="grid">${grid(books)}</div>`;
+<div class="grid lib" id="grid">${grid(libBooks())}</div>`;
 };
+
+const libBooks = () => { const q = state.q.toLowerCase(); return state.items.filter(b => (b.title + ' ' + b.author).toLowerCase().includes(q)); };
+
+// ---- series: a list page, and a page per series (read from the server's own metadata) ----
+const seriesCard = s => `<a class="book" href="#/series/${esc(s.id)}"><div class="cover" style="background:${tint(s.name)}">${esc(s.name)}${s.books[0] ? `<img class="cover-img" src="${esc(client().coverUrl(s.books[0].id))}" alt="" loading="lazy">` : ''}</div>
+<div class="col" style="gap:2px"><div class="strong">${esc(s.name)}</div><div class="cap muted">${s.books.length} ${s.books.length === 1 ? 'book' : 'books'}</div></div></a>`;
+// header of one series page, with an inline rename form (renaming needs edit rights on the server)
+const serHead = () => {
+  const s = state.cur, n = s.books.length;
+  return `<a href="#/series" class="cap muted" style="text-decoration:underline">All series</a>
+${state.renaming
+    ? `<form id="renameser" class="row g8" style="justify-content:flex-start;align-items:center"><input id="sername" name="sername" type="text" value="${esc(s.name)}" maxlength="120" aria-label="Series name" style="width:320px"><button type="submit" class="btn primary sm">Save</button><button type="button" class="btn sm" data-act="rename">Cancel</button></form>`
+    : `<div class="row g12" style="justify-content:flex-start;align-items:center"><h1>${esc(s.name)}</h1><button class="btn sm" data-act="rename">Rename</button></div>`}
+${state.renameErr ? `<div role="alert" class="danger">${esc(state.renameErr)}</div>` : ''}
+<div class="muted">${n} ${n === 1 ? 'book' : 'books'}</div>`;
+};
+function paintSerHead() {
+  const h = document.getElementById('serhead');
+  if (!h) return;
+  h.innerHTML = serHead();
+  document.getElementById('sername')?.select();
+}
+async function renameSeries(name) {
+  name = name.trim();
+  if (!name || name === state.cur.name) { state.renaming = false; return paintSerHead(); }
+  try {
+    await client().renameSeries(state.cur.id, name);
+    state.cur.name = name; state.renaming = false; state.renameErr = '';
+  } catch (e) {
+    state.renameErr = e.status === 403 ? "Error: Your account can't edit series on this server." : e.status ? `Error: The server answered ${e.status}.` : "Error: Can't reach the server. Check your connection.";
+  }
+  paintSerHead();
+}
+views.series = async id => {
+  if (!state.libId) return '<h1>Series</h1><p class="muted">No libraries found on this server</p>';
+  const list = await client().series(state.libId);
+  const one = id && list.find(s => s.id === id);
+  if (one) { state.cur = one; state.renaming = false; state.renameErr = ''; }
+  if (one) return `<div class="col g4" id="serhead">${serHead()}</div>
+<div class="grid lib">${grid(one.books)}</div>`;
+  return `<h1>Series</h1>${list.length ? `<div class="grid lib">${list.map(seriesCard).join('')}</div>` : '<p class="muted">No series in this library</p>'}`;
+};
+
 
 const setrow = (label, desc, id, ctl) => `<div class="setrow field"><div class="info"><label for="${id}">${label}</label>${desc ? `<div class="cap muted">${desc}</div>` : ''}</div>${ctl}</div>`;
 const settings = () => {
@@ -87,7 +131,7 @@ let seq = 0;
 const failure = e => `<div role="alert" class="danger">Error: ${e.status ? `The server answered ${e.status}.` : `Can't reach ${esc(state.session.server)}. Check the address or your connection.`} <a href="#/settings" style="text-decoration:underline">Check Settings</a></div>`;
 
 async function render() {
-  const n = ++seq, r = NAV.includes(location.hash.slice(2)) ? location.hash.slice(2) : (state.session ? 'home' : 'settings');
+  const [route, arg] = location.hash.slice(2).split('/'), n = ++seq, r = NAV.includes(route) ? route : (state.session ? 'home' : 'settings');
   document.documentElement.dataset.theme = state.theme;
   if (state.session && !state.libs) await loadLibs();
   if (n !== seq) return;
@@ -97,7 +141,7 @@ async function render() {
   if (focus) document.getElementById(focus)?.focus();
   if (!loading) return;
   let html;
-  try { html = await views[r](); } catch (e) { if (e.status === 401) return signOut('Error: Your session expired. Sign in again.'); html = failure(e); }
+  try { html = await views[r](arg); } catch (e) { if (e.status === 401) return signOut('Error: Your session expired. Sign in again.'); html = failure(e); }
   if (n === seq) document.getElementById('main').innerHTML = html;
 }
 
@@ -289,18 +333,19 @@ const act = {
     store.set('hidden', state.hidden);
     pickLib();
   },
-  lib: d => { state.libId = d.v; store.set('lib', d.v); }
+  lib: d => { state.libId = d.v; store.set('lib', d.v); },
+  rename: () => { state.renaming = !state.renaming; state.renameErr = ''; paintSerHead(); return true; }
 };
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
   if (t && !act[t.dataset.act](t.dataset)) render();
 });
-document.addEventListener('submit', e => { e.preventDefault(); signIn(); });
+document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
 document.addEventListener('input', e => {
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
-    const q = e.target.value.toLowerCase();
-    document.getElementById('grid').innerHTML = grid(state.items.filter(b => (b.title + ' ' + b.author).toLowerCase().includes(q)));
+    state.q = e.target.value;
+    document.getElementById('grid').innerHTML = grid(libBooks());
   }
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);

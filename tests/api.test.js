@@ -26,9 +26,25 @@ test('play returns tokened track urls and the resume point', async () => {
   assert.deepEqual(await api.play('i1'), { sessionId: 's1', start: 42, duration: 100, chapters: [], tracks: [{ url: 'https://x.example/api/items/i1/file/9?token=a%20b', start: 0, duration: 100 }] });
 });
 
+test('series come with their books flattened in order', async () => {
+  const b = (id, t) => ({ id, libraryId: 'lib1', media: { duration: 60, metadata: { title: t, authorName: 'A' } } });
+  const api = absClient(async () => reply({ results: [{ id: 's1', name: 'Dune', books: [b('i1', 'Dune'), b('i2', 'Messiah')] }] }), { server: 'https://x.example' });
+  const [s] = await api.series('lib1');
+  assert.deepEqual([s.name, s.books.map(x => x.title)], ['Dune', ['Dune', 'Messiah']]);
+});
+
 test('requests carry the bearer token and books are flattened', async () => {
   let auth;
   const api = absClient(async (u, init) => (auth = init.headers.Authorization, reply({ total: 1, results: [{ id: 'i1', libraryId: 'lib1', media: { duration: 3600, metadata: { title: 'Emma', authorName: 'Jane Austen' } } }] })), { server: 'https://x.example', token: 'tok' });
   assert.deepEqual(await api.items('lib1'), { total: 1, books: [{ id: 'i1', libraryId: 'lib1', title: 'Emma', author: 'Jane Austen', duration: 3600 }] });
   assert.equal(auth, 'Bearer tok');
+});
+
+test('renaming a series patches its name', async () => {
+  let seen;
+  const api = absClient(async (url, init) => (seen = { url, init }, reply({})), { server: 'https://x.example', token: 't' });
+  await api.renameSeries('s1', 'Dune Chronicles');
+  assert.equal(seen.url, 'https://x.example/api/series/s1');
+  assert.equal(seen.init.method, 'PATCH');
+  assert.deepEqual(JSON.parse(seen.init.body), { name: 'Dune Chronicles' });
 });

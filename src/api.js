@@ -31,6 +31,9 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
       return { sessionId: s.id, start: s.currentTime || 0, duration: s.duration || 0, chapters: (s.chapters || []).map(c => ({ start: c.start, end: c.end, title: c.title })), tracks: s.audioTracks.map(t => ({ url: withToken(t.contentUrl), start: t.startOffset || 0, duration: t.duration })) };
     },
     sync: (sessionId, body, close = false) => call(`/api/session/${sessionId}/${close ? 'close' : 'sync'}`, { method: 'POST', body: JSON.stringify(body) }, true),
+    // series list: each entry carries its books in reading order
+    series: async libId => (await call(`/api/libraries/${libId}/series?limit=200&sort=name`)).results.map(x => ({ id: x.id, name: x.name, books: (x.books || []).map(book) })),
+    renameSeries: (id, name) => call(`/api/series/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }, true),
     coverUrl: id => `${base}/api/items/${id}/cover?width=400&token=${encodeURIComponent(token)}`
   };
 }
