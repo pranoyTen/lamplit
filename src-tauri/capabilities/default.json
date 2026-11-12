@@ -7,6 +7,12 @@
     {
       "identifier": "http:default",
       "allow": [{ "url": "http://*" }, { "url": "http://*:*" }, { "url": "https://*" }, { "url": "https://*:*" }]
-    }
+    },
+    "fs:allow-open",
+    "fs:allow-write",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
+    "dialog:allow-open",
+    { "identifier": "fs:scope", "allow": [{ "path": "$APPDATA/downloads" }, { "path": "$APPDATA/downloads/**" }] }
   ]
 }

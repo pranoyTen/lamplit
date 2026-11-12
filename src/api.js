@@ -33,6 +33,26 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
     sync: (sessionId, body, close = false) => call(`/api/session/${sessionId}/${close ? 'close' : 'sync'}`, { method: 'POST', body: JSON.stringify(body) }, true),
     // series list: each entry carries its books in reading order
     series: async libId => (await call(`/api/libraries/${libId}/series?limit=200&sort=name`)).results.map(x => ({ id: x.id, name: x.name, books: (x.books || []).map(book) })),
+    // the files to download for one book, in play order
+    async item(id) {
+      const m = (await call(`/api/items/${id}?expanded=1`)).media;
+      let start = 0;
+      const tracks = [...m.audioFiles].sort((a, b) => a.index - b.index).map(f => {
+        const t = { url: withToken(`/api/items/${id}/file/${f.ino}`), ext: f.metadata.ext || '.' + f.metadata.filename.split('.').pop(), size: f.metadata.size || 0, duration: f.duration, start };
+        start += f.duration;
+        return t;
+      });
+      return { tracks, duration: m.duration || start, chapters: (m.chapters || []).map(c => ({ start: c.start, end: c.end, title: c.title })) };
+    },
+    async details(id) {
+      const i = await call(`/api/items/${id}?expanded=1&include=progress`), m = i.media, md = m.metadata, p = i.userMediaProgress;
+      return {
+        title: md.title, subtitle: md.subtitle || '', authors: (md.authors || []).map(x => x.name), narrators: md.narrators || [],
+        series: (md.series || []).map(x => ({ id: x.id, name: x.name, sequence: x.sequence })), genres: md.genres || [],
+        year: md.publishedYear || '', publisher: md.publisher || '', language: md.language || '', description: md.description || '',
+        duration: m.duration || 0, size: m.size || 0, chapters: (m.chapters || []).length, progress: p?.progress || 0, finished: !!p?.isFinished
+      };
+    },
     renameSeries: (id, name) => call(`/api/series/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }, true),
     coverUrl: id => `${base}/api/items/${id}/cover?width=400&token=${encodeURIComponent(token)}`
   };

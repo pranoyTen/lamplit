@@ -48,3 +48,9 @@ test('renaming a series patches its name', async () => {
   assert.equal(seen.init.method, 'PATCH');
   assert.deepEqual(JSON.parse(seen.init.body), { name: 'Dune Chronicles' });
 });
+
+test('details flatten the people, series and progress of one book', async () => {
+  const api = absClient(async () => reply({ media: { duration: 60, size: 9, chapters: [{}, {}], metadata: { title: 'Dune', authors: [{ name: 'Frank Herbert' }], narrators: ['S. Brick'], series: [{ id: 's1', name: 'Dune', sequence: '1' }], publishedYear: '1965' } }, userMediaProgress: { progress: 0.5, isFinished: false } }), { server: 'https://x.example' });
+  const d = await api.details('i1');
+  assert.deepEqual([d.title, d.authors, d.narrators, d.series, d.chapters, d.progress], ['Dune', ['Frank Herbert'], ['S. Brick'], [{ id: 's1', name: 'Dune', sequence: '1' }], 2, 0.5]);
+});

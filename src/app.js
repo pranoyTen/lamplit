@@ -11,6 +11,7 @@ const state = {
   session: store.get('session', null),
   libs: null,
   libId: store.get('lib', null),
+  dlcfg: store.get('dlcfg', { limitGB: 10, dir: null }), // download cap in GB and chosen folder (null = app data)
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
   items: [], q: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
@@ -25,6 +26,7 @@ const ICON = {
   library: '<path d="M4 19.5V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2.5zM4 19.5A2 2 0 0 0 6 21h13"/>',
   settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
   series: '<path d="M5 5h11a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2zM9 3h10a2 2 0 0 1 2 2v12"/>',
+  downloads: '<path d="M12 3v12m0 0-4-4m4 4 4-4M4 20h16"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   theme: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>'
 };
@@ -33,11 +35,11 @@ const tint = t => `hsl(${[...t].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 36
 const bar = pct => `<div class="bar thin"><i style="width:${Math.round(pct * 100)}%"></i></div>`;
 
 const card = (b, pct, extra = '') => `<div class="book"><button class="${coverCls(b.id)}" data-act="play" data-v="${esc(b.id)}" data-t="${esc(b.title)}" data-a="${esc(b.author)}" aria-label="Play ${esc(b.title)}" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(b.id))}" alt="" loading="lazy"><span class="ov" aria-hidden="true">${svg(PL.play, 40)}${svg(PL.pause, 40)}</span></button>
-<div class="col" style="gap:2px"><div class="strong">${esc(b.title)}</div><div class="cap muted">${esc(b.author)}${b.duration ? ' · ' + len(b.duration) : ''}</div></div>${pct > 0 && pct < 1 ? bar(pct) : ''}${extra}</div>`;
-const grid = (books, pct = {}, extra = () => '') => books.map(b => card(b, pct[b.id], extra(b))).join('') || '<p class="muted">Nothing here yet</p>';
+<a class="col btxt" href="#/book/${esc(b.id)}"><div class="strong">${esc(b.title)}</div><div class="cap muted">${esc(b.author)}${b.duration ? ' · ' + len(b.duration) : ''}</div></a>${pct > 0 && pct < 1 ? bar(pct) : ''}${extra}</div>`;
+const grid = (books, pct = {}, extra = dlExtra) => books.map(b => card(b, pct[b.id], extra(b))).join('') || '<p class="muted">Nothing here yet</p>';
 
 // ---- views ----
-const NAV = ['home', 'library', 'series', 'settings'];
+const NAV = ['home', 'library', 'series', 'downloads', 'settings'];
 const sidebar = route => `<nav aria-label="Main"><div class="logo">Lectern</div>
 <div class="navlinks">${NAV.map(r => `<a href="#/${r}"${r === route ? ' aria-current="page"' : ''}>${svg(ICON[r], 20)}${r[0].toUpperCase() + r.slice(1)}</a>`).join('')}</div>
 ${shown().length ? `<div class="col g8" style="padding:0 8px"><div class="label muted">Libraries</div>${shown().map(l => `<button class="lnk" id="lib-${esc(l.id)}" data-act="lib" data-v="${esc(l.id)}" aria-pressed="${l.id === state.libId}">${esc(l.name)}</button>`).join('')}</div>` : ''}
@@ -123,7 +125,77 @@ ${a.error ? `<div role="alert" class="danger" style="padding:12px 0;border-top:1
       const on = !state.hidden.includes(l.id);
       return setrow(esc(l.name), on ? 'Shown in the sidebar and on Home' : 'Hidden', 'sl-' + esc(l.id), `<input type="checkbox" id="sl-${esc(l.id)}" data-act="togglelib" data-v="${esc(l.id)}"${on ? ' checked' : ''}${on && shown().length < 2 ? ' disabled' : ''}>`);
     }).join('')}</div></section>` : '';
-  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}</div>`;
+  const dls = dl ? `<section class="col g12"><h2>Downloads</h2><div class="card panel">${setrow('Storage limit', `${bytes(dl.bytes())} used. New downloads that would pass the limit are refused`, 'dllimit', `<div class="row g8" style="align-items:center"><input id="dllimit" type="number" min="1" step="1" value="${state.dlcfg.limitGB}" style="width:96px"><span class="muted">GB</span></div>`)}
+${setrow('Download location', `${esc(state.dlcfg.dir ?? 'The Lectern app data folder (default)')}. Changing it only affects new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}</div></section>` : '';
+  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${dls}</div>`;
+};
+
+// ---- downloads: offline copies in the app data folder (desktop app only) ----
+const T = window.__TAURI__;
+let appData = '';
+T?.path?.appDataDir().then(p => { appData = p; });
+let repaint = null;
+const dl = T?.fs ? makeDownloads({
+  fetchFn: tfetch, fs: T.fs, base: T.path.BaseDirectory.AppData, api: () => client(),
+  cfg: () => ({ root: state.dlcfg.dir ?? 'downloads', abs: !!state.dlcfg.dir, limit: state.dlcfg.limitGB * 1e9 }),
+  urlFor: async (f, abs) => T.core.convertFileSrc(abs ? f : await T.path.join(appData, f)),
+  load: () => store.get('downloads', null), save: v => store.set('downloads', v),
+  onChange: () => { repaint ??= setTimeout(() => { repaint = null; paintDownloads(); }, 300); }
+}) : null;
+
+const bytes = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? Math.round(n / 1e6) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+const pctOf = it => it.total ? Math.min(100, Math.floor(it.bytes / it.total * 100)) : 0;
+const dlStatus = it => it.status === 'done' ? 'Downloaded' : it.status === 'active' ? `Downloading ${pctOf(it)}%` : it.status === 'queued' ? 'Queued' : 'Error';
+const dlColor = it => it.status === 'error' ? 'danger' : it.status === 'queued' ? 'muted' : 'accent';
+
+// the small control under a book cover: start a download, or link to where it is
+const dlExtra = b => {
+  if (!dl) return '';
+  const it = dl.get(b.id);
+  return it ? `<a class="cap muted" href="#/downloads">${dlStatus(it)}</a>` : `<button class="lnk" data-act="dl" data-v="${esc(b.id)}" data-t="${esc(b.title)}" data-a="${esc(b.author)}">Download</button>`;
+};
+
+const dlRow = it => `<li><div class="dcov" style="background:${tint(it.title)}"><img class="cover-img" src="${esc(client().coverUrl(it.id))}" alt="" loading="lazy"></div>
+<div class="col g4" style="flex:1;min-width:0"><div class="row g12" style="justify-content:flex-start;align-items:baseline"><span class="strong">${esc(it.title)}</span><span class="cap muted">${esc(it.author)}${it.total ? ' · ' + bytes(it.total) : ''}</span></div>
+${it.status === 'active' ? `<div class="bar thin" style="max-width:360px" role="progressbar" aria-valuenow="${pctOf(it)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pctOf(it)}%"></i></div>` : ''}
+<div class="label ${dlColor(it)}">${dlStatus(it)}</div>${it.status === 'error' ? `<div class="danger">Error: ${esc(it.error)}</div>` : ''}</div>
+${it.status === 'error' ? `<button class="btn primary" data-act="dlretry" data-v="${esc(it.id)}">Retry</button>` : ''}
+<button class="ib" data-act="dlremove" data-v="${esc(it.id)}" aria-label="${it.status === 'done' ? 'Remove download of ' : 'Cancel download of '}${esc(it.title)}">${svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', 20)}</button></li>`;
+
+const downloadsHtml = () => {
+  const all = dl.list(), done = all.filter(i => i.status === 'done').length;
+  return `<div class="row"><div class="col g4"><h1>Downloads</h1><div class="muted">${bytes(dl.bytes())} on this computer · ${done} ${done === 1 ? 'book' : 'books'} ready offline</div></div>
+<div class="row g12" style="flex-wrap:nowrap"><button class="btn" data-act="dlpause">${dl.paused ? 'Resume all' : 'Pause all'}</button><button class="btn" data-act="dlclean"${done ? '' : ' disabled'}>Remove finished books</button></div></div>
+${state.dlcfg.limitGB ? `<section class="col g8" style="max-width:720px"><div class="row" style="flex-wrap:nowrap"><span class="strong">Offline storage</span><span class="muted">${bytes(dl.bytes())} of ${state.dlcfg.limitGB} GB limit</span></div><div class="bar" role="progressbar" aria-label="Offline storage used" aria-valuenow="${Math.min(100, Math.round(dl.bytes() / (state.dlcfg.limitGB * 1e9) * 100))}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.min(100, dl.bytes() / (state.dlcfg.limitGB * 1e9) * 100)}%"></i></div></section>` : ''}
+<section class="col g12" style="max-width:960px"><h2>Queue</h2>${all.length ? `<ul class="card dl">${all.map(dlRow).join('')}</ul>` : '<p class="muted">Nothing downloaded yet. Use Download under any book to save it for offline listening.</p>'}</section>`;
+};
+function paintDownloads() {
+  const m = document.getElementById('dlpage');
+  if (m) m.innerHTML = downloadsHtml();
+}
+views.downloads = async () => dl
+  ? `<div id="dlpage" class="col" style="gap:24px">${downloadsHtml()}</div>`
+  : '<h1>Downloads</h1><p class="muted">Offline downloads need the Lectern desktop app.</p>';
+
+// ---- book details: everything the server knows about one book, plus play and download ----
+const playLabel = id => { const c = coverCls(id); return c.includes('playing') ? 'Pause' : c.includes('now') ? 'Resume' : 'Play'; };
+views.book = async id => {
+  const b = await client().details(id), it = dl?.get(id), authors = b.authors.join(', ');
+  const meta = `data-v="${esc(id)}" data-t="${esc(b.title)}" data-a="${esc(authors)}"`;
+  const facts = [['Narrated by', b.narrators.join(', ')], ['Length', b.duration ? len(b.duration) : ''], ['Chapters', b.chapters || ''], ['Published', [b.publisher, b.year].filter(Boolean).join(', ')], ['Language', b.language], ['Genres', b.genres.join(', ')], ['Size', b.size ? bytes(b.size) : '']].filter(([, v]) => v);
+  const text = b.description.replace(/<\/?(p|div|br)[^>]*>/gi, '\n').replace(/<[^>]+>/g, '').trim();
+  return `<div><button class="lnk" data-act="back">Back</button></div>
+<div class="row" style="align-items:flex-start;justify-content:flex-start;gap:32px">
+<div style="width:240px;max-width:100%;flex:none"><div class="cover" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(id))}" alt=""></div></div>
+<div class="col g16" style="flex:1 1 360px;min-width:0;max-width:720px">
+<div class="col g4"><h1>${esc(b.title)}</h1>${b.subtitle ? `<div class="muted">${esc(b.subtitle)}</div>` : ''}${authors ? `<div class="muted">by ${esc(authors)}</div>` : ''}
+${b.series.length ? `<div class="muted">${b.series.map(s => `<a href="#/series/${esc(s.id)}" style="text-decoration:underline">${esc(s.name)}${s.sequence ? ' #' + esc(s.sequence) : ''}</a>`).join(', ')}</div>` : ''}</div>
+${b.finished ? '<div class="label accent">Finished</div>' : b.progress > 0 ? `<div class="col g4" style="max-width:360px">${bar(b.progress)}<div class="cap muted">${Math.round(b.progress * 100)}% listened</div></div>` : ''}
+<div class="row g12" style="justify-content:flex-start;align-items:center"><button class="btn primary" data-act="play" data-playbtn ${meta}>${playLabel(id)}</button>
+${!dl ? '' : !it ? `<button class="btn" data-act="dl" ${meta}>Download</button>` : `${it.status === 'done' ? '' : `<span class="muted">${dlStatus(it)}</span>`}<button class="btn" data-act="dlremove" data-v="${esc(id)}">${it.status === 'done' ? 'Remove download' : 'Cancel download'}</button>`}</div>
+<div class="col g8">${facts.map(([k, v]) => `<div class="row g12" style="justify-content:flex-start;flex-wrap:nowrap;align-items:baseline"><span class="muted" style="width:96px;flex:none">${k}</span><span>${esc(v)}</span></div>`).join('')}</div>
+${text ? `<div style="white-space:pre-line">${esc(text)}</div>` : ''}
+</div></div>`;
 };
 
 // ---- render ----
@@ -131,7 +203,7 @@ let seq = 0;
 const failure = e => `<div role="alert" class="danger">Error: ${e.status ? `The server answered ${e.status}.` : `Can't reach ${esc(state.session.server)}. Check the address or your connection.`} <a href="#/settings" style="text-decoration:underline">Check Settings</a></div>`;
 
 async function render() {
-  const [route, arg] = location.hash.slice(2).split('/'), n = ++seq, r = NAV.includes(route) ? route : (state.session ? 'home' : 'settings');
+  const [route, arg] = location.hash.slice(2).split('/'), n = ++seq, r = [...NAV, 'book'].includes(route) ? route : (state.session ? 'home' : 'settings');
   document.documentElement.dataset.theme = state.theme;
   if (state.session && !state.libs) await loadLibs();
   if (n !== seq) return;
@@ -202,6 +274,8 @@ const PL = {
 
 function syncPlayer(close = false) {
   if (!player.s) return;
+  // shortcut: offline plays only remember their place on this computer, not on the server
+  if (!player.s.sessionId) { store.set('pos.' + player.id, position()); return; }
   const body = { currentTime: position(), timeListened: Math.round(player.listened), duration: player.s.duration };
   player.listened = 0;
   return client().sync(player.s.sessionId, body, close).catch(() => {});
@@ -220,6 +294,7 @@ function paintCovers() {
     c.className = coverCls(c.dataset.v);
     c.setAttribute('aria-label', (c.classList.contains('playing') ? 'Pause ' : 'Play ') + c.dataset.t);
   });
+  document.querySelectorAll('[data-playbtn]').forEach(b => { b.textContent = playLabel(b.dataset.v); });
 }
 const trackAt = (s, t) => Math.max(0, s.tracks.findLastIndex(k => t >= k.start));
 const chapterAt = (s, t) => s.chapters.findIndex(c => t >= c.start && t < c.end);
@@ -278,7 +353,7 @@ async function startPlayer({ v: id, t: title, a: author }) {
   el.innerHTML = `<div class="info"><div class="strong">${esc(title)}</div><div class="cap muted" id="np-status">Loading…</div></div>`;
   const status = m => { const n = document.getElementById('np-status'); if (n) n.textContent = m; };
   try {
-    const s = await client().play(id);
+    const s = (await dl?.session(id, store.get('pos.' + id, 0))) ?? await client().play(id);
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author;
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
@@ -334,6 +409,24 @@ const act = {
     pickLib();
   },
   lib: d => { state.libId = d.v; store.set('lib', d.v); },
+  back: () => { history.back(); return true; },
+  dlchoose: async () => {
+    const path = await T.dialog.open({ directory: true, title: 'Choose download folder' });
+    if (!path) return;
+    await T.core.invoke('allow_dir', { path });
+    state.dlcfg.dir = path; store.set('dlcfg', state.dlcfg); render();
+  },
+  dlreset: () => { state.dlcfg.dir = null; store.set('dlcfg', state.dlcfg); },
+  dl: d => {
+    dl.add({ id: d.v, title: d.t, author: d.a });
+    if (location.hash.startsWith('#/book/')) return false;
+    document.querySelector(`[data-act=dl][data-v="${CSS.escape(d.v)}"]`)?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: dlExtra({ id: d.v }) }).firstChild);
+    return true;
+  },
+  dlpause: () => { dl.paused ? dl.resumeAll() : dl.pauseAll(); paintDownloads(); return true; },
+  dlclean: () => { dl.removeFinished().then(paintDownloads); return true; },
+  dlretry: d => { dl.retry(d.v); paintDownloads(); return true; },
+  dlremove: d => { dl.remove(d.v).then(() => location.hash.startsWith('#/book/') ? render() : paintDownloads()); return true; },
   rename: () => { state.renaming = !state.renaming; state.renameErr = ''; paintSerHead(); return true; }
 };
 document.addEventListener('click', e => {
@@ -342,6 +435,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
 document.addEventListener('input', e => {
+  if (e.target.id === 'dllimit' && +e.target.value > 0) { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); }
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
     state.q = e.target.value;
@@ -351,3 +445,5 @@ document.addEventListener('input', e => {
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
 window.addEventListener('hashchange', render);
 render();
+// a chosen folder must be re-allowed on every launch before anything reads or writes it
+if (dl) Promise.all([...new Set([state.dlcfg.dir, ...dl.list().filter(i => i.abs).map(i => i.root)])].filter(Boolean).map(path => T.core.invoke('allow_dir', { path }))).catch(() => {}).finally(() => state.session && dl.pump());
