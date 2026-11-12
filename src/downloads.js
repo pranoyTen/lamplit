@@ -31,6 +31,11 @@ function makeDownloads({ fetchFn, fs, base, cfg, api, urlFor, load, save, onChan
         // whole-file mode: the size is unknown, or the server ignored Range and sent everything
         let whole = !t.size;
         while (whole || t.got < t.size) {
+          // trust the file, not the counter: seeking past the real end would leave a hole of zeros that no player can decode
+          if (t.got > 0) {
+            const size = await fs.stat(t.file, opt(it)).then(x => x.size, () => 0);
+            if (size < t.got) { it.bytes -= t.got - size; t.got = size; }
+          }
           ctl = new AbortController();
           const res = await fetchFn(t.url, { signal: ctl.signal, ...(!whole && { headers: { Range: `bytes=${t.got}-${Math.min(t.got + chunk, t.size) - 1}` } }) });
           if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
