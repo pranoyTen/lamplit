@@ -309,7 +309,7 @@ async function signIn() {
 // ---- player: lives outside #app so re-renders never interrupt playback ----
 // All times below are seconds from the start of the book; a book may be split over several files (tracks).
 const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false };
-const RATES = [1, 1.25, 1.5, 1.75, 2, 0.75];
+const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const audio = () => document.getElementById('audio');
 const position = () => player.s.tracks[player.i].start + audio().currentTime;
 const clock = t => { t = Math.max(0, Math.floor(t)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
@@ -383,17 +383,23 @@ function chapterStep(dir) {
   if (dir > 0) { if (s.chapters[c + 1]) seek(s.chapters[c + 1].start); }
   else seek(t - s.chapters[c].start > 3 || !s.chapters[c - 1] ? s.chapters[c].start : s.chapters[c - 1].start);
 }
-function toggleMenu(open) {
-  const m = document.getElementById('np-menu'), b = document.getElementById('np-chapbtn');
-  if (!m) return;
-  m.hidden = !(open ?? m.hidden);
-  b.setAttribute('aria-expanded', String(!m.hidden));
-  // keep the menu inside the window: slide it left when it would run past the right edge
-  m.style.left = '0px';
-  if (!m.hidden) { const r = m.getBoundingClientRect(); m.style.left = Math.min(0, innerWidth - 16 - r.right) + 'px'; }
-  // scroll the menu itself; scrollIntoView would also scroll the page behind the player
-  const cur = m.querySelector('[aria-current]');
-  if (!m.hidden && cur) m.scrollTop = cur.offsetTop - (m.clientHeight - cur.offsetHeight) / 2;
+// two popover menus share one open/close routine: opening one closes the other, no argument closes both
+const MENUS = { chap: ['np-menu', 'np-chapbtn'], speed: ['np-smenu', 'np-rate'] };
+function toggleMenu(which, open) {
+  for (const [k, [menuId, btnId]] of Object.entries(MENUS)) {
+    const m = document.getElementById(menuId), b = document.getElementById(btnId);
+    if (!m) continue;
+    m.hidden = k === which ? !(open ?? m.hidden) : true;
+    b.setAttribute('aria-expanded', String(!m.hidden));
+    // keep the menu inside the window: slide it left when it would run past the right edge
+    m.style.left = '0px';
+    if (m.hidden) continue;
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.min(0, innerWidth - 16 - r.right) + 'px';
+    // scroll the menu itself; scrollIntoView would also scroll the page behind the player
+    const cur = m.querySelector('[aria-current]');
+    if (cur) m.scrollTop = cur.offsetTop - (m.clientHeight - cur.offsetHeight) / 2;
+  }
 }
 function paintVolume() {
   const a = audio(), off = player.muted || player.vol === 0;
@@ -404,14 +410,16 @@ function paintVolume() {
 }
 const ctl = {
   mute: () => { player.muted = !player.muted; if (!player.muted && player.vol === 0) player.vol = 0.5; paintVolume(); },
-  chapters: () => toggleMenu(),
+  chapters: () => toggleMenu('chap'),
+  speed: () => toggleMenu('speed'),
   prev: () => chapterStep(-1), next: () => chapterStep(1),
   back: () => seek(position() - 15), fwd: () => seek(position() + 30),
   toggle: () => { const a = audio(); a.paused ? a.play() : a.pause(); },
-  rate: () => {
-    player.rate = RATES[(RATES.indexOf(player.rate) + 1) % RATES.length];
-    audio().defaultPlaybackRate = audio().playbackRate = player.rate;
-    document.getElementById('np-rate').textContent = player.rate + '×';
+  rate: r => {
+    player.rate = r;
+    audio().defaultPlaybackRate = audio().playbackRate = r;
+    document.getElementById('np-rate').textContent = r + '×';
+    document.querySelectorAll('#np-smenu [data-rate]').forEach(b => +b.dataset.rate === r ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current'));
   }
 };
 
@@ -451,7 +459,7 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
     el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in book">
 <div class="info"><div class="strong">${esc(title)}</div><div class="cap muted"><span id="np-status">${esc(author)}</span> · <span id="np-time"></span></div></div>
-<div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<button class="ib txt" data-k="rate" id="np-rate" aria-label="Playback speed">${player.rate}×</button></div>
+<div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', 'Back 15 seconds', skipIcon(15, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', 'Forward 30 seconds', skipIcon(30, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
 <div class="vol"><button class="ib" data-k="mute" id="np-mute"></button><input type="range" id="np-vol" min="0" max="1" step="0.05" aria-label="Volume"></div>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
 <audio id="audio"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
@@ -475,12 +483,13 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     a.addEventListener('error', () => status(`Can't play this file (${a.error?.message || 'code ' + a.error?.code})`));
     el.onclick = e => {
       const ch = e.target.closest('[data-ch]');
-      if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(false); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();
+      const rt = e.target.closest('[data-rate]');
+      if (ch) { seek(s.chapters[ch.dataset.ch].start); toggleMenu(); } else if (rt) { ctl.rate(+rt.dataset.rate); toggleMenu(); } else ctl[e.target.closest('[data-k]')?.dataset.k]?.();
     };
     el.querySelector('#np-seek').oninput = e => { e.target.style.setProperty('--p', (s.duration ? e.target.value / s.duration * 100 : 0) + '%'); document.getElementById('np-time').textContent = `${clock(e.target.value)} / ${clock(s.duration)}`; };
     el.querySelector('#np-seek').onchange = e => seek(+e.target.value);
-    document.onclick = e => { if (!e.target.closest('.chap')) toggleMenu(false); };
-    el.onkeydown = e => { if (e.key === 'Escape') { toggleMenu(false); document.getElementById('np-chapbtn')?.focus(); } };
+    document.onclick = e => { if (!e.target.closest('.chap')) toggleMenu(); };
+    el.onkeydown = e => { if (e.key === 'Escape') { toggleMenu(); e.target.closest('.chap')?.querySelector('[aria-haspopup]')?.focus(); } };
     paintPlayer();
   } catch (e) {
     if (!autoplay) return stopPlayer(); // a quiet preload that fails just leaves the player hidden
