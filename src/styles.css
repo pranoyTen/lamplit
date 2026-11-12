@@ -167,3 +167,5 @@ body.full #player{display:none}
 .pp-chs button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:52px;padding:0 16px;border:0;border-bottom:1px solid var(--hairline);background:transparent;color:var(--muted);font:inherit;text-align:left;cursor:pointer}
 .pp-chs li:last-child button{border-bottom:0}
 .pp-chs button[aria-current]{color:var(--ink);font-weight:500;background:var(--s200);box-shadow:inset 2px 0 var(--brand)}
+select{height:44px;padding:0 12px;border:1px solid var(--border-strong);border-radius:4px;background:var(--raised);color:var(--ink);font:inherit}
+.field select{background:var(--s100);width:200px;max-width:100%}
