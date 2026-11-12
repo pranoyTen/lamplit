@@ -371,7 +371,9 @@ function toggleMenu(open) {
   if (!m) return;
   m.hidden = !(open ?? m.hidden);
   b.setAttribute('aria-expanded', String(!m.hidden));
-  if (!m.hidden) m.querySelector('[aria-current]')?.scrollIntoView({ block: 'center' });
+  // scroll the menu itself; scrollIntoView would also scroll the page behind the player
+  const cur = m.querySelector('[aria-current]');
+  if (!m.hidden && cur) m.scrollTop = cur.offsetTop - (m.clientHeight - cur.offsetHeight) / 2;
 }
 function paintVolume() {
   const a = audio(), off = player.muted || player.vol === 0;
