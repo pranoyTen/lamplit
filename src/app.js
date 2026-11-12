@@ -563,7 +563,7 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       if (!el.querySelector('#np-seek:active')) paintPlayer();
     });
     a.addEventListener('play', () => {
-      paintPlayer();
+      paintPlayer(); taskbarPlaying(true);
       if (state.pb.rewind && player.pausedAt && Date.now() - player.pausedAt > 60000) seek(position() - 10);
       player.pausedAt = null;
       const m = state.pb.sleep; // the sleep timer starts with the press of play, and is not restarted by moving to the next file
@@ -571,7 +571,7 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       else if (m > 0 && !player.sleepAt) player.sleepAt = Date.now() + m * 60000;
     });
     a.addEventListener('pause', () => {
-      paintPlayer(); syncPlayer();
+      paintPlayer(); syncPlayer(); taskbarPlaying(false);
       if (!a.ended) { player.pausedAt = Date.now(); player.sleepAt = player.sleepCh = null; } // the end of a file is not a pause by the listener
     });
     a.addEventListener('ended', () => {
@@ -688,6 +688,10 @@ document.addEventListener('input', e => {
   }
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
+// the Windows taskbar thumbnail has skip back, play/pause and skip forward buttons: clicks arrive as events, the play state goes back
+const taskbarPlaying = playing => { T?.core?.invoke('taskbar_playing', { playing }).catch(() => {}); };
+T?.event?.listen('taskbar', e => { if (player.s && audio()) ctl[e.payload]?.(); });
+
 // space toggles play/pause and the arrow keys skip, unless the key belongs to what has focus (typing, a list, a slider, or a button that space already activates)
 document.addEventListener('keydown', e => {
   if (!player.s || !audio()) return;
