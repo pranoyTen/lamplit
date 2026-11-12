@@ -9,7 +9,7 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
     return noBody ? null : res.json();
   }
   const withToken = u => base + u + (u.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
-  const book = i => ({ id: i.id, libraryId: i.libraryId, title: i.media.metadata.title, author: i.media.metadata.authorName ?? i.media.metadata.author ?? '', duration: i.media.duration || 0 });
+  const book = i => ({ id: i.id, libraryId: i.libraryId, title: i.media.metadata.title, author: i.media.metadata.authorName ?? i.media.metadata.author ?? '', duration: i.media.duration || 0, added: i.addedAt || 0 });
 
   return {
     base,
@@ -24,7 +24,11 @@ function absClient(fetchFn, { server = '', token = '' } = {}) {
       return { total: r.total, books: r.results.map(book) };
     },
     inProgress: async () => (await call('/api/me/items-in-progress')).libraryItems.map(book),
-    progress: async () => Object.fromEntries((await call('/api/me')).mediaProgress.map(p => [p.libraryItemId, p.progress])),
+    progress: async () => Object.fromEntries((await call('/api/me')).mediaProgress.map(p => [p.libraryItemId, p.isFinished ? 1 : p.progress])),
+    setFinished: (id, finished) => call(`/api/me/progress/${id}`, { method: 'PATCH', body: JSON.stringify({ isFinished: finished }) }, true),
+    bookmarks: async id => ((await call('/api/me')).bookmarks || []).filter(b => b.libraryItemId === id).map(b => ({ time: b.time, title: b.title })).sort((a, b) => a.time - b.time),
+    addBookmark: (id, time, title) => call(`/api/me/item/${id}/bookmark`, { method: 'POST', body: JSON.stringify({ time, title }) }, true),
+    removeBookmark: (id, time) => call(`/api/me/item/${id}/bookmark/${time}`, { method: 'DELETE' }, true),
     // opens a playback session; start is where the server last left off, in seconds from the book's start
     async play(id) {
       const s = await call(`/api/items/${id}/play`, { method: 'POST', body: JSON.stringify({ deviceInfo: { clientName: 'Lectern' }, forceDirectPlay: true, supportedMimeTypes: ['audio/mpeg', 'audio/mp4', 'audio/flac', 'audio/ogg'] }) });

@@ -154,6 +154,13 @@ button:active:not(:disabled){transform:scale(.98)}
 #modal p{margin:0 0 24px}
 .mactions{display:flex;justify-content:flex-end;gap:12px}
 
+.hero{display:flex;flex-wrap:wrap;gap:24px;align-items:center;padding:24px}
+.menu.wide{width:176px}
+.pp-bms{overflow:hidden}
+.pp-bms li{display:flex;align-items:center;border-bottom:1px solid var(--hairline)}
+.pp-bms li:last-child{border-bottom:0}
+.pp-bms li>button:first-child{flex:1;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;min-height:48px;padding:0 8px 0 16px;border:0;background:transparent;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.pp-bms .ib{color:var(--muted)}
 /* full player page */
 body.full #player{display:none}
 .pp{display:flex;flex-wrap:wrap;gap:48px;align-items:flex-start;justify-content:center}

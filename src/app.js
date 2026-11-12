@@ -15,7 +15,7 @@ const state = {
   statsRange: 'year', stats: null,
   pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, ...store.get('pb', {}) }, // Settings > Playback
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
-  items: [], q: '',
+  items: [], q: '', q0: '', pct: {}, filter: 'all', sort: 'added', bm: [], bmErr: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
 };
 const client = () => absClient(tfetch, state.session);
@@ -50,26 +50,51 @@ ${shown().length ? `<div class="col g8" style="padding:0 8px"><div class="label 
 <div class="cap muted">${state.session ? 'Signed in to ' + esc(state.session.server) : 'Not signed in'}</div></div></nav>`;
 
 const views = {};
+const hero = (b, p) => {
+  const done = b.duration * p, meta = `data-v="${esc(b.id)}" data-t="${esc(b.title)}" data-a="${esc(b.author)}"`;
+  return `<section class="card hero" aria-label="Pick up where you left off"><div style="width:184px;max-width:100%;flex:none"><div class="cover" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(b.id))}" alt=""></div></div>
+<div class="col g16" style="flex:1 1 320px;min-width:0"><div class="col g4"><div class="label accent">In progress</div><h1>${esc(b.title)}</h1><div class="muted">${esc(b.author)}</div></div>
+<div class="col g8" style="max-width:520px"><div class="bar"><i style="width:${Math.round(p * 100)}%"></i></div><div class="row cap muted" style="flex-wrap:nowrap"><span>${len(done)} listened</span><span>${len(Math.max(0, b.duration - done))} left</span></div></div>
+<div class="row g12" style="justify-content:flex-start"><button class="btn primary" data-act="play" data-playbtn ${meta}>${playLabel(b.id)}</button><a class="btn" href="#/book/${esc(b.id)}">Book details</a></div></div></section>`;
+};
 views.home = async () => {
   const libs = shown();
   if (!libs.length) return '<h1>Home</h1><p class="muted">No libraries found on this server</p>';
   const api = client();
   const [cont, pct, ...recent] = await Promise.all([api.inProgress(), api.progress(), ...libs.map(l => api.items(l.id, { limit: 10, sort: 'addedAt', desc: 1 }))]);
-  const ids = new Set(libs.map(l => l.id));
-  return `<h1>Home</h1><section class="col g16"><h2>Continue listening</h2><div class="grid">${grid(cont.filter(b => ids.has(b.libraryId)), pct)}</div></section>
+  const ids = new Set(libs.map(l => l.id)), visible = cont.filter(b => ids.has(b.libraryId)), top = visible[0];
+  // search hands its text to the Library page
+  const search = `<form id="homesearch" class="search" role="search" style="max-width:480px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--muted)">${ICON.search}</svg><input id="hq" name="hq" type="search" aria-label="Search your library" placeholder="Search titles and authors"></form>`;
+  return `${search}${top ? hero(top, pct[top.id] || 0) : '<h1>Home</h1>'}<section class="col g16"><h2>Continue listening</h2><div class="grid">${grid(visible, pct)}</div></section>
 ${libs.map((l, i) => `<section class="col g16"><h2>Recently added${libs.length > 1 ? ' in ' + esc(l.name) : ''}</h2><div class="grid">${grid(recent[i].books, pct)}</div></section>`).join('')}`;
 };
-
+const FILTERS = [['all', 'All'], ['progress', 'In progress'], ['new', 'Not started'], ['done', 'Finished'], ['dl', 'Downloaded']];
+const SORTS = [['added', 'Recently added'], ['title', 'Title'], ['author', 'Author'], ['length', 'Length']];
+const filterPills = () => FILTERS.map(([k, l]) => `<button class="seg" data-act="filter" data-v="${k}" aria-pressed="${state.filter === k}">${l}</button>`).join('');
 views.library = async () => {
   if (!state.libId) return '<h1>Library</h1><p class="muted">No libraries found on this server</p>';
-  const { total, books } = await client().items(state.libId, { limit: 200, sort: 'media.metadata.title' });
-  state.items = books; state.q = '';
+  const [{ total, books }, pct] = await Promise.all([client().items(state.libId, { limit: 200, sort: 'media.metadata.title' }), client().progress()]);
+  state.items = books; state.pct = pct; state.q = state.q0; state.q0 = '';
   return `<div class="row"><div class="col g4"><h1>${esc(state.libs.find(l => l.id === state.libId)?.name ?? 'Library')}</h1><div class="muted">${total} books${total > books.length ? ` · showing the first ${books.length}` : ''}</div></div>
-<div class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--muted)">${ICON.search}</svg><input id="q" type="search" aria-label="Search this library" placeholder="Search" style="width:240px"></div></div>
-<div class="grid lib" id="grid">${grid(libBooks())}</div>`;
+<div class="row g12" style="align-items:center"><div class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--muted)">${ICON.search}</svg><input id="q" type="search" aria-label="Search this library" placeholder="Search" value="${esc(state.q)}" style="width:240px"></div>
+<label class="row g8" style="align-items:center;flex-wrap:nowrap"><span class="muted">Sort</span><select id="sort">${SORTS.map(([k, l]) => `<option value="${k}"${state.sort === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div></div>
+<div class="row g8" id="filters" role="group" aria-label="Filter" style="justify-content:flex-start">${filterPills()}</div>
+<div class="grid lib" id="grid">${grid(libBooks(), state.pct)}</div>`;
 };
 
-const libBooks = () => { const q = state.q.toLowerCase(); return state.items.filter(b => (b.title + ' ' + b.author).toLowerCase().includes(q)); };
+// what shows in the Library: the filter pill, the search text, then the chosen order
+const libBooks = () => {
+  const q = state.q.toLowerCase(), p = id => state.pct?.[id] || 0;
+  const keep = { all: () => true, progress: b => p(b.id) > 0 && p(b.id) < 1, new: b => !p(b.id), done: b => p(b.id) >= 1, dl: b => dl?.get(b.id)?.status === 'done' }[state.filter];
+  const order = { added: (a, b) => b.added - a.added, title: (a, b) => a.title.localeCompare(b.title), author: (a, b) => a.author.localeCompare(b.author) || a.title.localeCompare(b.title), length: (a, b) => b.duration - a.duration }[state.sort];
+  return state.items.filter(b => keep(b) && (b.title + ' ' + b.author).toLowerCase().includes(q)).sort(order);
+};
+function paintLib() {
+  const g = document.getElementById('grid');
+  if (!g) return;
+  g.innerHTML = grid(libBooks(), state.pct);
+  document.getElementById('filters').innerHTML = filterPills();
+}
 
 // ---- series: a list page, and a page per series (read from the server's own metadata) ----
 const seriesCard = s => `<a class="book" href="#/series/${esc(s.id)}"><div class="cover" style="background:${tint(s.name)}">${esc(s.name)}${s.books[0] ? `<img class="cover-img" src="${esc(client().coverUrl(s.books[0].id))}" alt="" loading="lazy">` : ''}</div>
@@ -145,7 +170,9 @@ ${switchRow('autoDelete', 'Remove downloads when a book is finished', 'Frees spa
 ${setrow('Offline storage limit', `${bytes(dl.bytes())} used right now. Books that would pass it are not downloaded`, 'dllimit', `<select id="dllimit">${limits.map(g => `<option value="${g}"${g === state.dlcfg.limitGB ? ' selected' : ''}>${g} GB</option>`).join('')}<option value="0"${state.dlcfg.limitGB ? '' : ' selected'}>No limit</option></select>`)}
 ${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}` : ''}</div></section>`;
   const keys = `<section class="col g12"><h2>Keyboard shortcuts</h2><div class="card panel">${[['Play or pause', ['Space']], ['Skip back or forward', ['Left', 'Right']], ['Volume up or down', ['Up', 'Down']]].map(([a, k]) => `<div class="setrow"><span>${a}</span><span class="row g4" style="flex-wrap:nowrap">${k.map(x => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div></section>`;
-  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}${keys}</div>`;
+  const appearance = `<section class="col g12"><h2>Appearance</h2><div class="card panel">${setrow('Theme', 'Choose light or dark', 'th-light', `<div class="row g8" role="group" aria-label="Theme">${['light', 'dark'].map(t => `<button class="seg" id="th-${t}" data-act="settheme" data-v="${t}" aria-pressed="${state.theme === t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>`)}</div></section>`;
+  const about = `<section class="col g4"><h2>About</h2><p class="muted" style="max-width:560px">Lectern is a working title for a desktop listening client for an Audiobookshelf server. It isn't affiliated with Audiobookshelf.</p></section>`;
+  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}${appearance}${keys}${about}</div>`;
 };
 
 // ---- downloads: offline copies in the app data folder (desktop app only) ----
@@ -227,7 +254,7 @@ views.book = async id => {
 ${b.series.length ? `<div class="muted">${b.series.map(s => `<a href="#/series/${esc(s.id)}" style="text-decoration:underline">${esc(s.name)}${s.sequence ? ' #' + esc(s.sequence) : ''}</a>`).join(', ')}</div>` : ''}</div>
 ${b.finished ? '<div class="label accent">Finished</div>' : b.progress > 0 ? `<div class="col g4" style="max-width:360px">${bar(b.progress)}<div class="cap muted">${Math.round(b.progress * 100)}% listened</div></div>` : ''}
 <div class="row g12" style="justify-content:flex-start;align-items:center"><button class="btn primary" data-act="play" data-playbtn ${meta}>${playLabel(id)}</button>
-${!dl ? '' : !it ? `<button class="btn" data-act="dl" ${meta}>Download</button>` : `${it.status === 'done' ? '' : `<span class="muted">${dlStatus(it)}</span>`}<button class="btn" data-act="dlremove" data-v="${esc(id)}">${it.status === 'done' ? 'Remove download' : 'Cancel download'}</button>`}</div>
+${!dl ? '' : !it ? `<button class="btn" data-act="dl" ${meta}>Download</button>` : `${it.status === 'done' ? '' : `<span class="muted">${dlStatus(it)}</span>`}<button class="btn" data-act="dlremove" data-v="${esc(id)}">${it.status === 'done' ? 'Remove download' : 'Cancel download'}</button>`}<button class="btn" data-act="finish" data-id="${esc(id)}" data-v="${b.finished ? 0 : 1}">${b.finished ? 'Mark as not finished' : 'Mark as finished'}</button></div>
 <div class="col g8">${facts.map(([k, v]) => `<div class="row g12" style="justify-content:flex-start;flex-wrap:nowrap;align-items:baseline"><span class="muted" style="width:96px;flex:none">${k}</span><span>${esc(v)}</span></div>`).join('')}</div>
 ${text ? `<div style="white-space:pre-line">${esc(text)}</div>` : ''}
 </div></div>`;
@@ -265,18 +292,26 @@ views.stats = async () => {
   return `<div id="statspage" class="col" style="gap:32px">${statsHtml()}</div>`;
 };
 
+// bookmarks of the playing book, kept on the server
+const bmHtml = () => (state.bmErr ? `<div role="alert" class="danger">Error: ${esc(state.bmErr)}</div>` : '') + (state.bm.length
+  ? `<ul class="plain card pp-bms">${state.bm.map(b => `<li><button data-act="bmgo" data-v="${b.time}"><span>${esc(b.title)}</span><span class="cap muted">${clock(b.time)}</span></button><button class="ib" data-act="bmdel" data-v="${b.time}" aria-label="Delete bookmark ${esc(b.title)}">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 16)}</button></li>`).join('')}</ul>`
+  : '<p class="muted">No bookmarks yet</p>');
+const paintBm = () => { const el = document.getElementById('pp-bm'); if (el) el.innerHTML = bmHtml(); };
 views.player = async () => {
   const s = player.s;
   const back = `<div><button class="lnk back" data-act="back">${svg('<path d="m6 9 6 6 6-6"/>', 16)}Collapse player</button></div>`;
   if (!s) return `${back}<div class="col g4"><h1>Player</h1><div class="muted">Nothing is playing. Pick a book from Home or Library</div></div>`;
+  state.bm = await client().bookmarks(player.id).catch(() => []); state.bmErr = '';
   const pk = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-act="pk" data-v="${k}" id="pp-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
   return `${back}<div class="pp">
 <section class="pp-main"><div class="cover pp-cover" style="background:${tint(s.title)}">${esc(s.title)}<img class="cover-img" src="${esc(client().coverUrl(player.id))}" alt=""></div>
 <div class="col g4"><h1>${esc(s.title)}</h1><div class="muted">${esc(s.author)}</div><div class="muted" id="pp-sub"></div></div>
 <div class="col g8"><input type="range" class="pp-seek" id="pp-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter"><div class="row cap muted" style="flex-wrap:nowrap"><span id="pp-t0"></span><span id="pp-t1"></span></div></div>
 <div class="pp-ctl">${pk('prev', 'Previous chapter', svg(PL.prev, 24))}${pk('back', `Back ${state.pb.back} seconds`, skipIcon(state.pb.back, true))}${pk('toggle', 'Pause', svg(PL.pause, 28), 'main big')}${pk('fwd', `Forward ${state.pb.fwd} seconds`, skipIcon(state.pb.fwd, false))}${pk('next', 'Next chapter', svg(PL.next, 24))}</div>
-<div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div></section>
-${s.chapters.length ? `<section class="col g12 pp-side"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
+<div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div>
+<div class="row g8" style="justify-content:center"><div class="chap"><button class="btn" id="pp-sleep" data-act="sleepmenu" aria-haspopup="true" aria-expanded="false">Sleep timer</button><div class="menu card wide" id="pp-sleepmenu" role="menu" hidden>${[[0, 'Off'], [15, '15 minutes'], [30, '30 minutes'], [45, '45 minutes'], ['chapter', 'End of chapter']].map(([v, l]) => `<button role="menuitem" data-act="sleep" data-v="${v}">${l}</button>`).join('')}</div></div><button class="btn" data-act="bookmark">Add bookmark</button></div></section>
+<div class="col g24 pp-side">${s.chapters.length ? `<section class="col g12"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
+<section class="col g12"><h2>Bookmarks</h2><div id="pp-bm">${bmHtml()}</div></section></div>
 </div>`;
 };
 
@@ -344,7 +379,7 @@ async function signIn() {
 
 // ---- player: lives outside #app so re-renders never interrupt playback ----
 // All times below are seconds from the start of the book; a book may be split over several files (tracks).
-const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false, pausedAt: null, sleepAt: null, sleepCh: null };
+const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false, pausedAt: null, sleepAt: null, sleepCh: null, sleepNext: null };
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const audio = () => document.getElementById('audio');
 const position = () => player.s.tracks[player.i].start + audio().currentTime;
@@ -421,7 +456,7 @@ function chapterStep(dir) {
   else seek(t - s.chapters[c].start > 3 || !s.chapters[c - 1] ? s.chapters[c].start : s.chapters[c - 1].start);
 }
 // two popover menus share one open/close routine: opening one closes the other, no argument closes both
-const MENUS = { chap: ['np-menu', 'np-chapbtn'], speed: ['np-smenu', 'np-rate'] };
+const MENUS = { chap: ['np-menu', 'np-chapbtn'], speed: ['np-smenu', 'np-rate'], sleep: ['pp-sleepmenu', 'pp-sleep'] };
 function toggleMenu(which, open) {
   for (const [k, [menuId, btnId]] of Object.entries(MENUS)) {
     const m = document.getElementById(menuId), b = document.getElementById(btnId);
@@ -468,6 +503,14 @@ function paintSkips() {
     for (const id of ['np-', 'pp-']) { const b = document.getElementById(id + k); if (b) { b.innerHTML = skipIcon(n, back); b.setAttribute('aria-label', label); } }
   }
 }
+// a sleep timer picked on the player page: starts now while playing, or with the next press of play
+function setSleep(v) {
+  const a = audio();
+  player.sleepAt = player.sleepCh = null;
+  if (a.paused) { player.sleepNext = v; return; }
+  player.sleepNext = null;
+  if (v === 'chapter') player.sleepCh = chapterSpan().c; else if (v > 0) player.sleepAt = Date.now() + v * 60000;
+}
 function chapterSpan() {
   const s = player.s, t = position(), c = chapterAt(s, t);
   const start = c >= 0 ? s.chapters[c].start : 0;
@@ -493,6 +536,8 @@ function paintPage(first = false) {
   }
   document.getElementById('pp-t1').textContent = '-' + clock(sp.end - t);
   document.getElementById('pp-sub').textContent = (c >= 0 ? `Chapter ${c + 1} of ${s.chapters.length} · ` : '') + len(Math.max(0, s.duration - t)) + ' left';
+  const sl = document.getElementById('pp-sleep');
+  if (sl) sl.textContent = player.sleepAt ? `Sleep in ${Math.max(1, Math.ceil((player.sleepAt - Date.now()) / 60000))} min` : player.sleepCh !== null ? 'Sleep at chapter end' : player.sleepNext ? 'Sleep timer set' : 'Sleep timer';
   const tg = document.getElementById('pp-toggle');
   tg.innerHTML = svg(a.paused ? PL.play : PL.pause, 28);
   tg.setAttribute('aria-label', a.paused ? 'Play' : 'Pause');
@@ -535,7 +580,7 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     s.author = author; s.title = title;
     if (!state.pb.sync && store.get('pos.' + id) != null) s.start = store.get('pos.' + id); // not syncing: this computer's own place
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
-    player.rate = store.get('rate.' + id, state.pb.speed); player.pausedAt = player.sleepAt = player.sleepCh = null; // a speed picked for this book wins over the default
+    player.rate = store.get('rate.' + id, state.pb.speed); player.pausedAt = player.sleepAt = player.sleepCh = player.sleepNext = null; // a speed picked for this book wins over the default
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
     el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter">
 <a class="ib" href="#/player" id="np-open" aria-label="Open player">${svg('<path d="m6 15 6-6 6 6"/>', 24)}</a>
@@ -566,7 +611,8 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       paintPlayer(); taskbarPlaying(true);
       if (state.pb.rewind && player.pausedAt && Date.now() - player.pausedAt > 60000) seek(position() - 10);
       player.pausedAt = null;
-      const m = state.pb.sleep; // the sleep timer starts with the press of play, and is not restarted by moving to the next file
+      const m = player.sleepNext ?? state.pb.sleep; // a timer picked on the player page wins over the default; it starts with the press of play and is not restarted by the next file
+      player.sleepNext = null;
       if (m === 'chapter' && player.sleepCh === null) player.sleepCh = chapterSpan().c;
       else if (m > 0 && !player.sleepAt) player.sleepAt = Date.now() + m * 60000;
     });
@@ -626,6 +672,21 @@ function confirmBox({ title, message, ok, cancel = 'Keep' }) {
 const savePb = () => { store.set('pb', state.pb); paintSkips(); dl?.pump(); };
 const act = {
   pb: d => { state.pb[d.k] = +d.v; savePb(); },
+  filter: d => { state.filter = d.v; paintLib(); return true; },
+  settheme: d => { state.theme = d.v; store.set('theme', d.v); },
+  sleepmenu: () => { toggleMenu('sleep'); return true; },
+  sleep: d => { setSleep(d.v === 'chapter' ? 'chapter' : +d.v); toggleMenu(); paintPage(); return true; },
+  bookmark: async () => {
+    const sp = chapterSpan(), t = Math.floor(position()), title = (sp.c >= 0 ? player.s.chapters[sp.c].title : player.s.title) + ' · ' + clock(t);
+    try { await client().addBookmark(player.id, t, title); state.bm = [...state.bm.filter(b => b.time !== t), { time: t, title }].sort((a, b) => a.time - b.time); state.bmErr = ''; } catch { state.bmErr = "Couldn't save the bookmark. Check your connection"; }
+    paintBm(); return true;
+  },
+  bmgo: d => { seek(+d.v); return true; },
+  bmdel: async d => {
+    try { await client().removeBookmark(player.id, +d.v); state.bm = state.bm.filter(b => b.time !== +d.v); state.bmErr = ''; } catch { state.bmErr = "Couldn't delete the bookmark. Check your connection"; }
+    paintBm(); return true;
+  },
+  finish: async d => { await client().setFinished(d.id, d.v === '1').catch(() => {}); render(); return true; },
   pbtoggle: d => { state.pb[d.v] = !state.pb[d.v]; savePb(); },
   pk: d => { ctl[d.v]?.(); return true; },
   prate: d => { ctl.rate(+d.v); paintPage(); return true; },
@@ -675,8 +736,12 @@ document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
   if (t && !act[t.dataset.act](t.dataset)) render();
 });
-document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  if (e.target.id === 'homesearch') { state.q0 = e.target.elements.hq.value; location.hash = '#/library'; } else if (e.target.id === 'renameser') renameSeries(e.target.elements.sername.value); else signIn();
+});
 document.addEventListener('change', e => {
+  if (e.target.id === 'sort') { state.sort = e.target.value; paintLib(); }
   if (e.target.id === 'dllimit') { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); dl?.pump(); }
   if (e.target.id === 'pb-sleep') { state.pb.sleep = e.target.value === 'chapter' ? 'chapter' : +e.target.value; savePb(); } if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
@@ -684,7 +749,7 @@ document.addEventListener('input', e => {
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
     state.q = e.target.value;
-    document.getElementById('grid').innerHTML = grid(libBooks());
+    paintLib();
   }
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);

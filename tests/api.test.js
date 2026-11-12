@@ -35,8 +35,8 @@ test('series come with their books flattened in order', async () => {
 
 test('requests carry the bearer token and books are flattened', async () => {
   let auth;
-  const api = absClient(async (u, init) => (auth = init.headers.Authorization, reply({ total: 1, results: [{ id: 'i1', libraryId: 'lib1', media: { duration: 3600, metadata: { title: 'Emma', authorName: 'Jane Austen' } } }] })), { server: 'https://x.example', token: 'tok' });
-  assert.deepEqual(await api.items('lib1'), { total: 1, books: [{ id: 'i1', libraryId: 'lib1', title: 'Emma', author: 'Jane Austen', duration: 3600 }] });
+  const api = absClient(async (u, init) => (auth = init.headers.Authorization, reply({ total: 1, results: [{ id: 'i1', libraryId: 'lib1', addedAt: 1700000000000, media: { duration: 3600, metadata: { title: 'Emma', authorName: 'Jane Austen' } } }] })), { server: 'https://x.example', token: 'tok' });
+  assert.deepEqual(await api.items('lib1'), { total: 1, books: [{ id: 'i1', libraryId: 'lib1', title: 'Emma', author: 'Jane Austen', duration: 3600, added: 1700000000000 }] });
   assert.equal(auth, 'Bearer tok');
 });
 
@@ -58,4 +58,23 @@ test('details flatten the people, series and progress of one book', async () => 
 test('stats flatten per-book listening time and finished books', async () => {
   const api = absClient(async url => reply(url.endsWith('/api/me') ? { mediaProgress: [{ libraryItemId: 'i1', isFinished: true, finishedAt: 5 }, { libraryItemId: 'i2', isFinished: false }] } : { days: { '2026-11-12': 60 }, items: { i1: { id: 'i1', timeListening: 90, mediaMetadata: { title: 'Emma', authors: [{ name: 'Jane Austen' }] } } } }), { server: 'https://x.example' });
   assert.deepEqual(await api.stats(), { days: { '2026-11-12': 60 }, items: [{ id: 'i1', title: 'Emma', author: 'Jane Austen', secs: 90 }], finished: [{ id: 'i1', at: 5 }] });
+});
+
+test('mark as finished, bookmarks and finished-as-complete progress', async () => {
+  const seen = [];
+  const api = absClient(async (url, init = {}) => {
+    seen.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
+    return reply(url.endsWith('/api/me') ? { mediaProgress: [{ libraryItemId: 'a', progress: 0.4 }, { libraryItemId: 'b', progress: 0.9, isFinished: true }], bookmarks: [{ libraryItemId: 'a', time: 90, title: 'Late' }, { libraryItemId: 'a', time: 10, title: 'Early' }, { libraryItemId: 'z', time: 5, title: 'Other' }] } : {});
+  }, { server: 'https://x.example' });
+  assert.deepEqual(await api.progress(), { a: 0.4, b: 1 });
+  assert.deepEqual((await api.bookmarks('a')).map(b => b.title), ['Early', 'Late']);
+  seen.length = 0;
+  await api.setFinished('a', true);
+  await api.addBookmark('a', 42, 'Ch 3');
+  await api.removeBookmark('a', 42);
+  assert.deepEqual(seen, [
+    { url: 'https://x.example/api/me/progress/a', method: 'PATCH', body: { isFinished: true } },
+    { url: 'https://x.example/api/me/item/a/bookmark', method: 'POST', body: { time: 42, title: 'Ch 3' } },
+    { url: 'https://x.example/api/me/item/a/bookmark/42', method: 'DELETE', body: undefined }
+  ]);
 });
