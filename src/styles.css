@@ -169,3 +169,4 @@ body.full #player{display:none}
 .pp-chs button[aria-current]{color:var(--ink);font-weight:500;background:var(--s200);box-shadow:inset 2px 0 var(--brand)}
 select{height:44px;padding:0 12px;border:1px solid var(--border-strong);border-radius:4px;background:var(--raised);color:var(--ink);font:inherit}
 .field select{background:var(--s100);width:200px;max-width:100%}
+kbd{padding:2px 10px;border:1px solid var(--border-strong);border-radius:4px;background:var(--s200);color:var(--ink);font:500 12px/20px var(--sans)}

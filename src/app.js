@@ -13,7 +13,7 @@ const state = {
   libId: store.get('lib', null),
   dlcfg: store.get('dlcfg', { limitGB: 10, dir: null }), // download cap in GB and chosen folder (null = app data)
   statsRange: 'year', stats: null,
-  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, ...store.get('pb', {}) }, // Settings > Playback
+  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, ...store.get('pb', {}) }, // Settings > Playback
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
   items: [], q: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
@@ -138,9 +138,14 @@ ${a.error ? `<div role="alert" class="danger" style="padding:12px 0;border-top:1
       const on = !state.hidden.includes(l.id);
       return setrow(esc(l.name), on ? (shown().length < 2 ? 'Shown in the sidebar and on Home. At least one library stays on' : 'Shown in the sidebar and on Home') : 'Hidden', 'sl-' + esc(l.id), `<input type="checkbox" id="sl-${esc(l.id)}" data-act="togglelib" data-v="${esc(l.id)}"${on ? ' checked' : ''}${on && shown().length < 2 ? ' disabled' : ''}>`);
     }).join('')}</div></section>` : '';
-  const dls = dl ? `<section class="col g12"><h2>Downloads</h2><div class="card panel">${setrow('Storage limit', `${bytes(dl.bytes())} used. Books that would pass it are not downloaded`, 'dllimit', `<div class="row g8" style="align-items:center"><input id="dllimit" type="number" min="1" step="1" value="${state.dlcfg.limitGB}" style="width:96px"><span class="muted">GB</span></div>`)}
-${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}</div></section>` : '';
-  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}</div>`;
+  const limits = [...new Set([5, 10, 20, 50, state.dlcfg.limitGB])].sort((a, b) => a - b).filter(Boolean);
+  const dls = `<section class="col g12"><h2>Sync and downloads</h2><div class="card panel">${switchRow('sync', 'Sync progress with your server', 'Keep your place on every device you listen on')}${dl ? `
+${switchRow('metered', 'Download on metered connections', 'Allow downloads when your connection is limited. Not every computer reports this')}
+${switchRow('autoDelete', 'Remove downloads when a book is finished', 'Frees space automatically. Finished books stay in your library')}
+${setrow('Offline storage limit', `${bytes(dl.bytes())} used right now. Books that would pass it are not downloaded`, 'dllimit', `<select id="dllimit">${limits.map(g => `<option value="${g}"${g === state.dlcfg.limitGB ? ' selected' : ''}>${g} GB</option>`).join('')}<option value="0"${state.dlcfg.limitGB ? '' : ' selected'}>No limit</option></select>`)}
+${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}` : ''}</div></section>`;
+  const keys = `<section class="col g12"><h2>Keyboard shortcuts</h2><div class="card panel">${[['Play or pause', ['Space']], ['Skip back or forward', ['Left', 'Right']], ['Volume up or down', ['Up', 'Down']]].map(([a, k]) => `<div class="setrow"><span>${a}</span><span class="row g4" style="flex-wrap:nowrap">${k.map(x => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div></section>`;
+  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}${keys}</div>`;
 };
 
 // ---- downloads: offline copies in the app data folder (desktop app only) ----
@@ -161,17 +166,21 @@ if (T?.window) {
 let appData = '';
 T?.path?.appDataDir().then(p => { appData = p; });
 let repaint = null;
+// desktop webviews rarely say whether a link is metered; this holds the queue only when the platform reports cellular or data saver
+const metered = () => navigator.connection?.type === 'cellular' || navigator.connection?.saveData === true;
 const dl = T?.fs ? makeDownloads({
   fetchFn: tfetch, fs: T.fs, base: T.path.BaseDirectory.AppData, api: () => client(),
   cfg: () => ({ root: state.dlcfg.dir ?? 'downloads', abs: !!state.dlcfg.dir, limit: state.dlcfg.limitGB * 1e9 }),
   urlFor: async (f, abs) => T.core.convertFileSrc(abs ? f : await T.path.join(appData, f)),
   load: () => store.get('downloads', null), save: v => store.set('downloads', v), onDone: id => swapToLocal(id),
+  allowed: () => state.pb.metered || !metered(),
   onChange: () => { repaint ??= setTimeout(() => { repaint = null; paintDownloads(); }, 300); }
 }) : null;
 
 const bytes = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? Math.round(n / 1e6) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
 const pctOf = it => it.total ? Math.min(100, Math.floor(it.bytes / it.total * 100)) : 0;
-const dlStatus = it => it.status === 'done' ? 'Downloaded' : it.status === 'active' ? `Downloading ${pctOf(it)}%` : it.status === 'queued' ? 'Queued' : 'Error';
+const dlStatus = it => it.status === 'done' ? 'Downloaded' : it.status === 'active' ? `Downloading ${pctOf(it)}%` : it.status === 'queued' ? (state.pb.metered || !metered() ? 'Queued' : 'Waiting for an unmetered connection') : 'Error';
+navigator.connection?.addEventListener('change', () => dl?.pump());
 const dlColor = it => it.status === 'error' ? 'danger' : it.status === 'queued' ? 'muted' : 'accent';
 
 // the small control under a book cover: start a download, or link to where it is
@@ -353,11 +362,12 @@ const listenQ = makeListenQueue({
   load: () => store.get('listenq', null), save: v => store.set('listenq', v),
   send: async (id, e) => { const s = await client().play(id); await client().sync(s.sessionId, { currentTime: e.currentTime, timeListened: Math.round(e.timeListened), duration: e.duration }, true); }
 });
-const flushListening = () => state.session && listenQ.size() ? listenQ.flush(player.id) : undefined;
+const flushListening = () => state.session && state.pb.sync && listenQ.size() ? listenQ.flush(player.id) : undefined;
 window.addEventListener('online', flushListening);
 function syncPlayer(close = false, queueOnly = false) {
   if (!player.s) return;
   store.set('pos.' + player.id, position()); // the place is always kept here too, for offline starts
+  if (!state.pb.sync) { player.listened = 0; return; } // Settings > Sync progress is off
   const { sessionId, duration } = player.s, body = { currentTime: position(), timeListened: Math.round(player.listened), duration };
   player.listened = 0;
   // no session (server was unreachable at start), a dead one, or leaving the app: keep the time queued, it is sent when the server answers
@@ -523,6 +533,7 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     }
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author; s.title = title;
+    if (!state.pb.sync && store.get('pos.' + id) != null) s.start = store.get('pos.' + id); // not syncing: this computer's own place
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
     player.rate = store.get('rate.' + id, state.pb.speed); player.pausedAt = player.sleepAt = player.sleepCh = null; // a speed picked for this book wins over the default
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
@@ -564,7 +575,10 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       if (!a.ended) { player.pausedAt = Date.now(); player.sleepAt = player.sleepCh = null; } // the end of a file is not a pause by the listener
     });
     a.addEventListener('ended', () => {
-      if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else syncPlayer();
+      if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else {
+        syncPlayer();
+        if (state.pb.autoDelete && dl?.get(player.id)) dl.remove(player.id).then(() => location.hash.startsWith('#/book/') ? render() : paintDownloads()); // finished books free their space
+      }
     });
     a.addEventListener('error', () => {
       console.warn('audio error', a.error?.code, a.error?.message);
@@ -609,7 +623,7 @@ function confirmBox({ title, message, ok, cancel = 'Keep' }) {
   });
 }
 
-const savePb = () => { store.set('pb', state.pb); paintSkips(); };
+const savePb = () => { store.set('pb', state.pb); paintSkips(); dl?.pump(); };
 const act = {
   pb: d => { state.pb[d.k] = +d.v; savePb(); },
   pbtoggle: d => { state.pb[d.v] = !state.pb[d.v]; savePb(); },
@@ -663,10 +677,10 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
 document.addEventListener('change', e => {
+  if (e.target.id === 'dllimit') { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); dl?.pump(); }
   if (e.target.id === 'pb-sleep') { state.pb.sleep = e.target.value === 'chapter' ? 'chapter' : +e.target.value; savePb(); } if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
   if (e.target.id === 'pp-seek') { barFill(e); document.getElementById('pp-t0').textContent = clock(e.target.value); }
-  if (e.target.id === 'dllimit' && +e.target.value > 0) { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); }
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
     state.q = e.target.value;
@@ -680,6 +694,12 @@ document.addEventListener('keydown', e => {
   const t = e.target, typing = t.isContentEditable || t.closest('textarea, select, input:not([type=range])');
   if (e.key === ' ' && !e.repeat && !typing && !t.closest('button, a')) { e.preventDefault(); ctl.toggle(); }
   else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !typing && !t.matches('input[type=range]')) { e.preventDefault(); ctl[e.key === 'ArrowLeft' ? 'back' : 'fwd'](); }
+  else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !typing && !t.matches('input[type=range]')) {
+    e.preventDefault();
+    const now = player.muted ? 0 : player.vol;
+    player.vol = Math.min(1, Math.max(0, Math.round((now + (e.key === 'ArrowUp' ? 0.05 : -0.05)) * 20) / 20));
+    player.muted = false; store.set('vol', player.vol); paintVolume();
+  }
 });
 window.addEventListener('hashchange', render);
 render();
