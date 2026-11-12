@@ -480,7 +480,11 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
     a.addEventListener('ended', () => {
       if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else syncPlayer();
     });
-    a.addEventListener('error', () => status(`Can't play this file (${a.error?.message || 'code ' + a.error?.code})`));
+    a.addEventListener('error', () => {
+      console.warn('audio error', a.error?.code, a.error?.message);
+      // MediaError codes: 2 network, 3 decode, 4 source not supported
+      status(a.error?.code === 2 ? "Can't read the file. Check your connection" : s.local ? 'This download looks damaged. Remove it in Downloads and download it again' : "Can't decode this file");
+    });
     el.onclick = e => {
       const ch = e.target.closest('[data-ch]');
       const rt = e.target.closest('[data-rate]');
