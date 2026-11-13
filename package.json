@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "test": "node --test"
+    "test": "node --test",
+    "version:set": "node scripts/version.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

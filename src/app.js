@@ -13,9 +13,9 @@ const state = {
   libId: store.get('lib', null),
   dlcfg: store.get('dlcfg', { limitGB: 10, dir: null }), // download cap in GB and chosen folder (null = app data)
   statsRange: 'year', stats: null,
-  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, ...store.get('pb', {}) }, // Settings > Playback
+  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, ...store.get('pb', {}) }, // Settings > Playback
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
-  items: [], q: '',
+  version: '', items: [], q: '', q0: '', pct: {}, filter: 'all', sort: 'added', bm: [], bmErr: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
 };
 const client = () => absClient(tfetch, state.session);
@@ -47,29 +47,54 @@ const sidebar = route => `<nav aria-label="Main"><div class="logo">Lectern</div>
 <div class="navlinks">${NAV.map(r => `<a href="#/${r}"${r === route ? ' aria-current="page"' : ''}>${svg(ICON[r], 20)}${r[0].toUpperCase() + r.slice(1)}</a>`).join('')}</div>
 ${shown().length ? `<div class="col g8" style="padding:0 8px"><div class="label muted">Libraries</div>${shown().map(l => `<button class="lnk" id="lib-${esc(l.id)}" data-act="lib" data-v="${esc(l.id)}" aria-pressed="${l.id === state.libId}">${esc(l.name)}</button>`).join('')}</div>` : ''}
 <div class="navfoot"><button class="btn" id="theme" data-act="theme" aria-label="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} theme">${svg(ICON.theme, 20)}Theme: ${state.theme === 'dark' ? 'Dark' : 'Light'}</button>
-<div class="cap muted">${state.session ? 'Signed in to ' + esc(state.session.server) : 'Not signed in'}</div></div></nav>`;
+<div class="cap muted">${state.session ? 'Signed in to ' + esc(state.session.server) : 'Not signed in'}</div><div class="cap muted" id="appver">${state.version ? 'Version ' + esc(state.version) : ''}</div></div></nav>`;
 
 const views = {};
+const hero = (b, p) => {
+  const done = b.duration * p, meta = `data-v="${esc(b.id)}" data-t="${esc(b.title)}" data-a="${esc(b.author)}"`;
+  return `<section class="card hero" aria-label="Pick up where you left off"><div style="width:184px;max-width:100%;flex:none"><div class="cover" style="background:${tint(b.title)}">${esc(b.title)}<img class="cover-img" src="${esc(client().coverUrl(b.id))}" alt=""></div></div>
+<div class="col g16" style="flex:1 1 320px;min-width:0"><div class="col g4"><div class="label accent">In progress</div><h1>${esc(b.title)}</h1><div class="muted">${esc(b.author)}</div></div>
+<div class="col g8" style="max-width:520px"><div class="bar"><i style="width:${Math.round(p * 100)}%"></i></div><div class="row cap muted" style="flex-wrap:nowrap"><span>${len(done)} listened</span><span>${len(Math.max(0, b.duration - done))} left</span></div></div>
+<div class="row g12" style="justify-content:flex-start"><button class="btn primary" data-act="play" data-playbtn ${meta}>${playLabel(b.id)}</button><a class="btn" href="#/book/${esc(b.id)}">Book details</a></div></div></section>`;
+};
 views.home = async () => {
   const libs = shown();
   if (!libs.length) return '<h1>Home</h1><p class="muted">No libraries found on this server</p>';
   const api = client();
   const [cont, pct, ...recent] = await Promise.all([api.inProgress(), api.progress(), ...libs.map(l => api.items(l.id, { limit: 10, sort: 'addedAt', desc: 1 }))]);
-  const ids = new Set(libs.map(l => l.id));
-  return `<h1>Home</h1><section class="col g16"><h2>Continue listening</h2><div class="grid">${grid(cont.filter(b => ids.has(b.libraryId)), pct)}</div></section>
+  const ids = new Set(libs.map(l => l.id)), visible = cont.filter(b => ids.has(b.libraryId)), top = visible[0];
+  // search hands its text to the Library page
+  const search = `<form id="homesearch" class="search" role="search" style="max-width:480px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--muted)">${ICON.search}</svg><input id="hq" name="hq" type="search" aria-label="Search your library" placeholder="Search titles and authors"></form>`;
+  return `${search}${top ? hero(top, pct[top.id] || 0) : '<h1>Home</h1>'}<section class="col g16"><h2>Continue listening</h2><div class="grid">${grid(visible, pct)}</div></section>
 ${libs.map((l, i) => `<section class="col g16"><h2>Recently added${libs.length > 1 ? ' in ' + esc(l.name) : ''}</h2><div class="grid">${grid(recent[i].books, pct)}</div></section>`).join('')}`;
 };
-
+const FILTERS = [['all', 'All'], ['progress', 'In progress'], ['new', 'Not started'], ['done', 'Finished'], ['dl', 'Downloaded']];
+const SORTS = [['added', 'Recently added'], ['title', 'Title'], ['author', 'Author'], ['length', 'Length']];
+const filterPills = () => FILTERS.map(([k, l]) => `<button class="seg" data-act="filter" data-v="${k}" aria-pressed="${state.filter === k}">${l}</button>`).join('');
 views.library = async () => {
   if (!state.libId) return '<h1>Library</h1><p class="muted">No libraries found on this server</p>';
-  const { total, books } = await client().items(state.libId, { limit: 200, sort: 'media.metadata.title' });
-  state.items = books; state.q = '';
+  const [{ total, books }, pct] = await Promise.all([client().items(state.libId, { limit: 200, sort: 'media.metadata.title' }), client().progress()]);
+  state.items = books; state.pct = pct; state.q = state.q0; state.q0 = '';
   return `<div class="row"><div class="col g4"><h1>${esc(state.libs.find(l => l.id === state.libId)?.name ?? 'Library')}</h1><div class="muted">${total} books${total > books.length ? ` · showing the first ${books.length}` : ''}</div></div>
-<div class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--muted)">${ICON.search}</svg><input id="q" type="search" aria-label="Search this library" placeholder="Search" style="width:240px"></div></div>
-<div class="grid lib" id="grid">${grid(libBooks())}</div>`;
+<div class="row g12" style="align-items:center"><div class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--muted)">${ICON.search}</svg><input id="q" type="search" aria-label="Search this library" placeholder="Search" value="${esc(state.q)}" style="width:240px"></div>
+<label class="row g8" style="align-items:center;flex-wrap:nowrap"><span class="muted">Sort</span><select id="sort">${SORTS.map(([k, l]) => `<option value="${k}"${state.sort === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div></div>
+<div class="row g8" id="filters" role="group" aria-label="Filter" style="justify-content:flex-start">${filterPills()}</div>
+<div class="grid lib" id="grid">${grid(libBooks(), state.pct)}</div>`;
 };
 
-const libBooks = () => { const q = state.q.toLowerCase(); return state.items.filter(b => (b.title + ' ' + b.author).toLowerCase().includes(q)); };
+// what shows in the Library: the filter pill, the search text, then the chosen order
+const libBooks = () => {
+  const q = state.q.toLowerCase(), p = id => state.pct?.[id] || 0;
+  const keep = { all: () => true, progress: b => p(b.id) > 0 && p(b.id) < 1, new: b => !p(b.id), done: b => p(b.id) >= 1, dl: b => dl?.get(b.id)?.status === 'done' }[state.filter];
+  const order = { added: (a, b) => b.added - a.added, title: (a, b) => a.title.localeCompare(b.title), author: (a, b) => a.author.localeCompare(b.author) || a.title.localeCompare(b.title), length: (a, b) => b.duration - a.duration }[state.sort];
+  return state.items.filter(b => keep(b) && (b.title + ' ' + b.author).toLowerCase().includes(q)).sort(order);
+};
+function paintLib() {
+  const g = document.getElementById('grid');
+  if (!g) return;
+  g.innerHTML = grid(libBooks(), state.pct);
+  document.getElementById('filters').innerHTML = filterPills();
+}
 
 // ---- series: a list page, and a page per series (read from the server's own metadata) ----
 const seriesCard = s => `<a class="book" href="#/series/${esc(s.id)}"><div class="cover" style="background:${tint(s.name)}">${esc(s.name)}${s.books[0] ? `<img class="cover-img" src="${esc(client().coverUrl(s.books[0].id))}" alt="" loading="lazy">` : ''}</div>
@@ -138,13 +163,21 @@ ${a.error ? `<div role="alert" class="danger" style="padding:12px 0;border-top:1
       const on = !state.hidden.includes(l.id);
       return setrow(esc(l.name), on ? (shown().length < 2 ? 'Shown in the sidebar and on Home. At least one library stays on' : 'Shown in the sidebar and on Home') : 'Hidden', 'sl-' + esc(l.id), `<input type="checkbox" id="sl-${esc(l.id)}" data-act="togglelib" data-v="${esc(l.id)}"${on ? ' checked' : ''}${on && shown().length < 2 ? ' disabled' : ''}>`);
     }).join('')}</div></section>` : '';
-  const dls = dl ? `<section class="col g12"><h2>Downloads</h2><div class="card panel">${setrow('Storage limit', `${bytes(dl.bytes())} used. Books that would pass it are not downloaded`, 'dllimit', `<div class="row g8" style="align-items:center"><input id="dllimit" type="number" min="1" step="1" value="${state.dlcfg.limitGB}" style="width:96px"><span class="muted">GB</span></div>`)}
-${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}</div></section>` : '';
-  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}</div>`;
+  const limits = [...new Set([5, 10, 20, 50, state.dlcfg.limitGB])].sort((a, b) => a - b).filter(Boolean);
+  const dls = `<section class="col g12"><h2>Sync and downloads</h2><div class="card panel">${switchRow('sync', 'Sync progress with your server', 'Keep your place on every device you listen on')}${dl ? `
+${switchRow('metered', 'Download on metered connections', 'Allow downloads when your connection is limited. Not every computer reports this')}
+${switchRow('autoDelete', 'Remove downloads when a book is finished', 'Frees space automatically. Finished books stay in your library')}
+${setrow('Offline storage limit', `${bytes(dl.bytes())} used right now. Books that would pass it are not downloaded`, 'dllimit', `<select id="dllimit">${limits.map(g => `<option value="${g}"${g === state.dlcfg.limitGB ? ' selected' : ''}>${g} GB</option>`).join('')}<option value="0"${state.dlcfg.limitGB ? '' : ' selected'}>No limit</option></select>`)}
+${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}` : ''}</div></section>`;
+  const keys = `<section class="col g12"><h2>Keyboard shortcuts</h2><div class="card panel">${[['Play or pause', ['Space']], ['Skip back or forward', ['Left', 'Right']], ['Volume up or down', ['Up', 'Down']]].map(([a, k]) => `<div class="setrow"><span>${a}</span><span class="row g4" style="flex-wrap:nowrap">${k.map(x => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div></section>`;
+  const appearance = `<section class="col g12"><h2>Appearance</h2><div class="card panel">${setrow('Theme', 'Choose light or dark', 'th-light', `<div class="row g8" role="group" aria-label="Theme">${['light', 'dark'].map(t => `<button class="seg" id="th-${t}" data-act="settheme" data-v="${t}" aria-pressed="${state.theme === t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>`)}</div></section>`;
+  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}${appearance}${keys}</div>`;
 };
 
 // ---- downloads: offline copies in the app data folder (desktop app only) ----
 const T = window.__TAURI__;
+// the version comes from tauri.conf.json (set with npm run version:set), so the app shows what was built
+T?.app?.getVersion().then(v => { state.version = v; const el = document.getElementById('appver'); if (el) el.textContent = 'Version ' + v; }).catch(() => {});
 // the window has no system title bar (decorations are off), so the app draws its own: drag area plus minimize, maximize, close
 if (T?.window) {
   const w = T.window.getCurrentWindow(), bar = document.getElementById('titlebar');
@@ -161,17 +194,21 @@ if (T?.window) {
 let appData = '';
 T?.path?.appDataDir().then(p => { appData = p; });
 let repaint = null;
+// desktop webviews rarely say whether a link is metered; this holds the queue only when the platform reports cellular or data saver
+const metered = () => navigator.connection?.type === 'cellular' || navigator.connection?.saveData === true;
 const dl = T?.fs ? makeDownloads({
   fetchFn: tfetch, fs: T.fs, base: T.path.BaseDirectory.AppData, api: () => client(),
   cfg: () => ({ root: state.dlcfg.dir ?? 'downloads', abs: !!state.dlcfg.dir, limit: state.dlcfg.limitGB * 1e9 }),
   urlFor: async (f, abs) => T.core.convertFileSrc(abs ? f : await T.path.join(appData, f)),
   load: () => store.get('downloads', null), save: v => store.set('downloads', v), onDone: id => swapToLocal(id),
+  allowed: () => state.pb.metered || !metered(),
   onChange: () => { repaint ??= setTimeout(() => { repaint = null; paintDownloads(); }, 300); }
 }) : null;
 
 const bytes = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? Math.round(n / 1e6) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
 const pctOf = it => it.total ? Math.min(100, Math.floor(it.bytes / it.total * 100)) : 0;
-const dlStatus = it => it.status === 'done' ? 'Downloaded' : it.status === 'active' ? `Downloading ${pctOf(it)}%` : it.status === 'queued' ? 'Queued' : 'Error';
+const dlStatus = it => it.status === 'done' ? 'Downloaded' : it.status === 'active' ? `Downloading ${pctOf(it)}%` : it.status === 'queued' ? (state.pb.metered || !metered() ? 'Queued' : 'Waiting for an unmetered connection') : 'Error';
+navigator.connection?.addEventListener('change', () => dl?.pump());
 const dlColor = it => it.status === 'error' ? 'danger' : it.status === 'queued' ? 'muted' : 'accent';
 
 // the small control under a book cover: start a download, or link to where it is
@@ -218,7 +255,7 @@ views.book = async id => {
 ${b.series.length ? `<div class="muted">${b.series.map(s => `<a href="#/series/${esc(s.id)}" style="text-decoration:underline">${esc(s.name)}${s.sequence ? ' #' + esc(s.sequence) : ''}</a>`).join(', ')}</div>` : ''}</div>
 ${b.finished ? '<div class="label accent">Finished</div>' : b.progress > 0 ? `<div class="col g4" style="max-width:360px">${bar(b.progress)}<div class="cap muted">${Math.round(b.progress * 100)}% listened</div></div>` : ''}
 <div class="row g12" style="justify-content:flex-start;align-items:center"><button class="btn primary" data-act="play" data-playbtn ${meta}>${playLabel(id)}</button>
-${!dl ? '' : !it ? `<button class="btn" data-act="dl" ${meta}>Download</button>` : `${it.status === 'done' ? '' : `<span class="muted">${dlStatus(it)}</span>`}<button class="btn" data-act="dlremove" data-v="${esc(id)}">${it.status === 'done' ? 'Remove download' : 'Cancel download'}</button>`}</div>
+${!dl ? '' : !it ? `<button class="btn" data-act="dl" ${meta}>Download</button>` : `${it.status === 'done' ? '' : `<span class="muted">${dlStatus(it)}</span>`}<button class="btn" data-act="dlremove" data-v="${esc(id)}">${it.status === 'done' ? 'Remove download' : 'Cancel download'}</button>`}<button class="btn" data-act="finish" data-id="${esc(id)}" data-v="${b.finished ? 0 : 1}">${b.finished ? 'Mark as not finished' : 'Mark as finished'}</button></div>
 <div class="col g8">${facts.map(([k, v]) => `<div class="row g12" style="justify-content:flex-start;flex-wrap:nowrap;align-items:baseline"><span class="muted" style="width:96px;flex:none">${k}</span><span>${esc(v)}</span></div>`).join('')}</div>
 ${text ? `<div style="white-space:pre-line">${esc(text)}</div>` : ''}
 </div></div>`;
@@ -256,18 +293,26 @@ views.stats = async () => {
   return `<div id="statspage" class="col" style="gap:32px">${statsHtml()}</div>`;
 };
 
+// bookmarks of the playing book, kept on the server
+const bmHtml = () => (state.bmErr ? `<div role="alert" class="danger">Error: ${esc(state.bmErr)}</div>` : '') + (state.bm.length
+  ? `<ul class="plain card pp-bms">${state.bm.map(b => `<li><button data-act="bmgo" data-v="${b.time}"><span>${esc(b.title)}</span><span class="cap muted">${clock(b.time)}</span></button><button class="ib" data-act="bmdel" data-v="${b.time}" aria-label="Delete bookmark ${esc(b.title)}">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 16)}</button></li>`).join('')}</ul>`
+  : '<p class="muted">No bookmarks yet</p>');
+const paintBm = () => { const el = document.getElementById('pp-bm'); if (el) el.innerHTML = bmHtml(); };
 views.player = async () => {
   const s = player.s;
   const back = `<div><button class="lnk back" data-act="back">${svg('<path d="m6 9 6 6 6-6"/>', 16)}Collapse player</button></div>`;
   if (!s) return `${back}<div class="col g4"><h1>Player</h1><div class="muted">Nothing is playing. Pick a book from Home or Library</div></div>`;
+  state.bm = await client().bookmarks(player.id).catch(() => []); state.bmErr = '';
   const pk = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-act="pk" data-v="${k}" id="pp-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
   return `${back}<div class="pp">
 <section class="pp-main"><div class="cover pp-cover" style="background:${tint(s.title)}">${esc(s.title)}<img class="cover-img" src="${esc(client().coverUrl(player.id))}" alt=""></div>
 <div class="col g4"><h1>${esc(s.title)}</h1><div class="muted">${esc(s.author)}</div><div class="muted" id="pp-sub"></div></div>
 <div class="col g8"><input type="range" class="pp-seek" id="pp-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter"><div class="row cap muted" style="flex-wrap:nowrap"><span id="pp-t0"></span><span id="pp-t1"></span></div></div>
 <div class="pp-ctl">${pk('prev', 'Previous chapter', svg(PL.prev, 24))}${pk('back', `Back ${state.pb.back} seconds`, skipIcon(state.pb.back, true))}${pk('toggle', 'Pause', svg(PL.pause, 28), 'main big')}${pk('fwd', `Forward ${state.pb.fwd} seconds`, skipIcon(state.pb.fwd, false))}${pk('next', 'Next chapter', svg(PL.next, 24))}</div>
-<div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div></section>
-${s.chapters.length ? `<section class="col g12 pp-side"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
+<div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div>
+<div class="row g8" style="justify-content:center"><div class="chap"><button class="btn" id="pp-sleep" data-act="sleepmenu" aria-haspopup="true" aria-expanded="false">Sleep timer</button><div class="menu card wide" id="pp-sleepmenu" role="menu" hidden>${[[0, 'Off'], [15, '15 minutes'], [30, '30 minutes'], [45, '45 minutes'], ['chapter', 'End of chapter']].map(([v, l]) => `<button role="menuitem" data-act="sleep" data-v="${v}">${l}</button>`).join('')}</div></div><button class="btn" data-act="bookmark">Add bookmark</button></div></section>
+<div class="col g24 pp-side">${s.chapters.length ? `<section class="col g12"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
+<section class="col g12"><h2>Bookmarks</h2><div id="pp-bm">${bmHtml()}</div></section></div>
 </div>`;
 };
 
@@ -335,7 +380,7 @@ async function signIn() {
 
 // ---- player: lives outside #app so re-renders never interrupt playback ----
 // All times below are seconds from the start of the book; a book may be split over several files (tracks).
-const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false, pausedAt: null, sleepAt: null, sleepCh: null };
+const player = { id: null, s: null, i: 0, listened: 0, last: 0, rate: 1, vol: store.get('vol', 1), muted: false, pausedAt: null, sleepAt: null, sleepCh: null, sleepNext: null };
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const audio = () => document.getElementById('audio');
 const position = () => player.s.tracks[player.i].start + audio().currentTime;
@@ -353,11 +398,12 @@ const listenQ = makeListenQueue({
   load: () => store.get('listenq', null), save: v => store.set('listenq', v),
   send: async (id, e) => { const s = await client().play(id); await client().sync(s.sessionId, { currentTime: e.currentTime, timeListened: Math.round(e.timeListened), duration: e.duration }, true); }
 });
-const flushListening = () => state.session && listenQ.size() ? listenQ.flush(player.id) : undefined;
+const flushListening = () => state.session && state.pb.sync && listenQ.size() ? listenQ.flush(player.id) : undefined;
 window.addEventListener('online', flushListening);
 function syncPlayer(close = false, queueOnly = false) {
   if (!player.s) return;
   store.set('pos.' + player.id, position()); // the place is always kept here too, for offline starts
+  if (!state.pb.sync) { player.listened = 0; return; } // Settings > Sync progress is off
   const { sessionId, duration } = player.s, body = { currentTime: position(), timeListened: Math.round(player.listened), duration };
   player.listened = 0;
   // no session (server was unreachable at start), a dead one, or leaving the app: keep the time queued, it is sent when the server answers
@@ -411,7 +457,7 @@ function chapterStep(dir) {
   else seek(t - s.chapters[c].start > 3 || !s.chapters[c - 1] ? s.chapters[c].start : s.chapters[c - 1].start);
 }
 // two popover menus share one open/close routine: opening one closes the other, no argument closes both
-const MENUS = { chap: ['np-menu', 'np-chapbtn'], speed: ['np-smenu', 'np-rate'] };
+const MENUS = { chap: ['np-menu', 'np-chapbtn'], speed: ['np-smenu', 'np-rate'], sleep: ['pp-sleepmenu', 'pp-sleep'] };
 function toggleMenu(which, open) {
   for (const [k, [menuId, btnId]] of Object.entries(MENUS)) {
     const m = document.getElementById(menuId), b = document.getElementById(btnId);
@@ -458,6 +504,14 @@ function paintSkips() {
     for (const id of ['np-', 'pp-']) { const b = document.getElementById(id + k); if (b) { b.innerHTML = skipIcon(n, back); b.setAttribute('aria-label', label); } }
   }
 }
+// a sleep timer picked on the player page: starts now while playing, or with the next press of play
+function setSleep(v) {
+  const a = audio();
+  player.sleepAt = player.sleepCh = null;
+  if (a.paused) { player.sleepNext = v; return; }
+  player.sleepNext = null;
+  if (v === 'chapter') player.sleepCh = chapterSpan().c; else if (v > 0) player.sleepAt = Date.now() + v * 60000;
+}
 function chapterSpan() {
   const s = player.s, t = position(), c = chapterAt(s, t);
   const start = c >= 0 ? s.chapters[c].start : 0;
@@ -483,6 +537,8 @@ function paintPage(first = false) {
   }
   document.getElementById('pp-t1').textContent = '-' + clock(sp.end - t);
   document.getElementById('pp-sub').textContent = (c >= 0 ? `Chapter ${c + 1} of ${s.chapters.length} · ` : '') + len(Math.max(0, s.duration - t)) + ' left';
+  const sl = document.getElementById('pp-sleep');
+  if (sl) sl.textContent = player.sleepAt ? `Sleep in ${Math.max(1, Math.ceil((player.sleepAt - Date.now()) / 60000))} min` : player.sleepCh !== null ? 'Sleep at chapter end' : player.sleepNext ? 'Sleep timer set' : 'Sleep timer';
   const tg = document.getElementById('pp-toggle');
   tg.innerHTML = svg(a.paused ? PL.play : PL.pause, 28);
   tg.setAttribute('aria-label', a.paused ? 'Play' : 'Pause');
@@ -523,8 +579,9 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     }
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author; s.title = title;
+    if (!state.pb.sync && store.get('pos.' + id) != null) s.start = store.get('pos.' + id); // not syncing: this computer's own place
     player.s = s; player.i = trackAt(s, s.start); player.listened = 0; player.last = 0;
-    player.rate = store.get('rate.' + id, state.pb.speed); player.pausedAt = player.sleepAt = player.sleepCh = null; // a speed picked for this book wins over the default
+    player.rate = store.get('rate.' + id, state.pb.speed); player.pausedAt = player.sleepAt = player.sleepCh = player.sleepNext = null; // a speed picked for this book wins over the default
     const ib = (k, label, icon, cls = '') => `<button class="ib ${cls}" data-k="${k}" id="np-${k}" aria-label="${label}"${s.chapters.length || !/prev|next/.test(k) ? '' : ' disabled'}>${icon}</button>`;
     el.innerHTML = `<input type="range" class="np-seek" id="np-seek" min="0" max="${Math.floor(s.duration)}" step="1" value="0" aria-label="Position in chapter">
 <a class="ib" href="#/player" id="np-open" aria-label="Open player">${svg('<path d="m6 15 6-6 6 6"/>', 24)}</a>
@@ -552,19 +609,23 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       if (!el.querySelector('#np-seek:active')) paintPlayer();
     });
     a.addEventListener('play', () => {
-      paintPlayer();
+      paintPlayer(); taskbarPlaying(true);
       if (state.pb.rewind && player.pausedAt && Date.now() - player.pausedAt > 60000) seek(position() - 10);
       player.pausedAt = null;
-      const m = state.pb.sleep; // the sleep timer starts with the press of play, and is not restarted by moving to the next file
+      const m = player.sleepNext ?? state.pb.sleep; // a timer picked on the player page wins over the default; it starts with the press of play and is not restarted by the next file
+      player.sleepNext = null;
       if (m === 'chapter' && player.sleepCh === null) player.sleepCh = chapterSpan().c;
       else if (m > 0 && !player.sleepAt) player.sleepAt = Date.now() + m * 60000;
     });
     a.addEventListener('pause', () => {
-      paintPlayer(); syncPlayer();
+      paintPlayer(); syncPlayer(); taskbarPlaying(false);
       if (!a.ended) { player.pausedAt = Date.now(); player.sleepAt = player.sleepCh = null; } // the end of a file is not a pause by the listener
     });
     a.addEventListener('ended', () => {
-      if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else syncPlayer();
+      if (player.i + 1 < s.tracks.length) { player.i++; player.last = 0; a.src = s.tracks[player.i].url; a.play(); } else {
+        syncPlayer();
+        if (state.pb.autoDelete && dl?.get(player.id)) dl.remove(player.id).then(() => location.hash.startsWith('#/book/') ? render() : paintDownloads()); // finished books free their space
+      }
     });
     a.addEventListener('error', () => {
       console.warn('audio error', a.error?.code, a.error?.message);
@@ -609,9 +670,24 @@ function confirmBox({ title, message, ok, cancel = 'Keep' }) {
   });
 }
 
-const savePb = () => { store.set('pb', state.pb); paintSkips(); };
+const savePb = () => { store.set('pb', state.pb); paintSkips(); dl?.pump(); };
 const act = {
   pb: d => { state.pb[d.k] = +d.v; savePb(); },
+  filter: d => { state.filter = d.v; paintLib(); return true; },
+  settheme: d => { state.theme = d.v; store.set('theme', d.v); },
+  sleepmenu: () => { toggleMenu('sleep'); return true; },
+  sleep: d => { setSleep(d.v === 'chapter' ? 'chapter' : +d.v); toggleMenu(); paintPage(); return true; },
+  bookmark: async () => {
+    const sp = chapterSpan(), t = Math.floor(position()), title = (sp.c >= 0 ? player.s.chapters[sp.c].title : player.s.title) + ' · ' + clock(t);
+    try { await client().addBookmark(player.id, t, title); state.bm = [...state.bm.filter(b => b.time !== t), { time: t, title }].sort((a, b) => a.time - b.time); state.bmErr = ''; } catch { state.bmErr = "Couldn't save the bookmark. Check your connection"; }
+    paintBm(); return true;
+  },
+  bmgo: d => { seek(+d.v); return true; },
+  bmdel: async d => {
+    try { await client().removeBookmark(player.id, +d.v); state.bm = state.bm.filter(b => b.time !== +d.v); state.bmErr = ''; } catch { state.bmErr = "Couldn't delete the bookmark. Check your connection"; }
+    paintBm(); return true;
+  },
+  finish: async d => { await client().setFinished(d.id, d.v === '1').catch(() => {}); render(); return true; },
   pbtoggle: d => { state.pb[d.v] = !state.pb[d.v]; savePb(); },
   pk: d => { ctl[d.v]?.(); return true; },
   prate: d => { ctl.rate(+d.v); paintPage(); return true; },
@@ -661,25 +737,39 @@ document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
   if (t && !act[t.dataset.act](t.dataset)) render();
 });
-document.addEventListener('submit', e => { e.preventDefault(); e.target.id === 'renameser' ? renameSeries(e.target.elements.sername.value) : signIn(); });
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  if (e.target.id === 'homesearch') { state.q0 = e.target.elements.hq.value; location.hash = '#/library'; } else if (e.target.id === 'renameser') renameSeries(e.target.elements.sername.value); else signIn();
+});
 document.addEventListener('change', e => {
+  if (e.target.id === 'sort') { state.sort = e.target.value; paintLib(); }
+  if (e.target.id === 'dllimit') { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); dl?.pump(); }
   if (e.target.id === 'pb-sleep') { state.pb.sleep = e.target.value === 'chapter' ? 'chapter' : +e.target.value; savePb(); } if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
   if (e.target.id === 'pp-seek') { barFill(e); document.getElementById('pp-t0').textContent = clock(e.target.value); }
-  if (e.target.id === 'dllimit' && +e.target.value > 0) { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); }
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
     state.q = e.target.value;
-    document.getElementById('grid').innerHTML = grid(libBooks());
+    paintLib();
   }
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
+// the Windows taskbar thumbnail has skip back, play/pause and skip forward buttons: clicks arrive as events, the play state goes back
+const taskbarPlaying = playing => { T?.core?.invoke('taskbar_playing', { playing }).catch(() => {}); };
+T?.event?.listen('taskbar', e => { if (player.s && audio()) ctl[e.payload]?.(); });
+
 // space toggles play/pause and the arrow keys skip, unless the key belongs to what has focus (typing, a list, a slider, or a button that space already activates)
 document.addEventListener('keydown', e => {
   if (!player.s || !audio()) return;
   const t = e.target, typing = t.isContentEditable || t.closest('textarea, select, input:not([type=range])');
   if (e.key === ' ' && !e.repeat && !typing && !t.closest('button, a')) { e.preventDefault(); ctl.toggle(); }
   else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !typing && !t.matches('input[type=range]')) { e.preventDefault(); ctl[e.key === 'ArrowLeft' ? 'back' : 'fwd'](); }
+  else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !typing && !t.matches('input[type=range]')) {
+    e.preventDefault();
+    const now = player.muted ? 0 : player.vol;
+    player.vol = Math.min(1, Math.max(0, Math.round((now + (e.key === 'ArrowUp' ? 0.05 : -0.05)) * 20) / 20));
+    player.muted = false; store.set('vol', player.vol); paintVolume();
+  }
 });
 window.addEventListener('hashchange', render);
 render();

@@ -160,3 +160,18 @@ test('a finished book whose files lost bytes is not offered for offline play', a
   files['downloads/b1/0.mp3'].length = 3;
   assert.equal(await dl.session('b1', 0), null);
 });
+
+test('the queue waits while downloads are not allowed and starts when they are', async () => {
+  const { fetchFn } = server(DATA);
+  let ok = false;
+  const fs = { mkdir: async () => {}, open: async () => ({ seek: async () => {}, write: async () => {}, close: async () => {} }), remove: async () => {}, stat: async () => ({ size: 1e9 }) };
+  const api = () => ({ item: async () => ({ duration: 10, chapters: [], tracks: [{ url: 'u1', ext: '.mp3', size: 5, duration: 10, start: 0 }] }) });
+  const d = makeDownloads({ fetchFn, fs, base: 14, cfg: () => ({ root: 'downloads', abs: false, limit: 0 }), api, urlFor: async f => f, load: () => null, save: () => {}, allowed: () => ok, chunk: 4 });
+  d.add({ id: 'b5', title: 'X', author: 'A' });
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(d.get('b5').status, 'queued');
+  ok = true;
+  d.pump();
+  await settled(d);
+  assert.equal(d.get('b5').status, 'done');
+});
