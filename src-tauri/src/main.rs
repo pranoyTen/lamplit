@@ -111,7 +111,12 @@ fn close_to_tray(app: tauri::AppHandle, on: bool) -> Result<(), String> {
     let item = |id, text| MenuItem::with_id(&app, id, text, true, None::<&str>).map_err(|e| e.to_string());
     let menu = Menu::with_items(&app, &[&item("show", "Show Lectern")?, &item("toggle", "Play or pause")?, &item("quit", "Quit")?]).map_err(|e| e.to_string())?;
     let mut tray = TrayIconBuilder::with_id("main").tooltip("Lectern").menu(&menu).show_menu_on_left_click(false);
-    if let Some(icon) = app.default_window_icon() {
+    // a Mac menu bar icon is a plain black shape that macOS tints to suit the bar (a "template" image); elsewhere the colour app icon is used
+    if cfg!(target_os = "macos") {
+        if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")) {
+            tray = tray.icon(icon).icon_as_template(true);
+        }
+    } else if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
     tray.on_menu_event(|app, e| match e.id.as_ref() {
