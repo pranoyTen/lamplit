@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lectern</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body{display:block;height:100vh;padding:16px;overflow:hidden;user-select:none}
+  .mp{display:flex;flex-direction:column;gap:12px;height:100%}
+  .mp-top{display:flex;gap:12px;align-items:center;min-width:0}
+  .mp-cover{width:64px;height:64px;flex:none;border-radius:8px;background:var(--s200) center/cover no-repeat}
+  .mp-info{min-width:0}
+  .mp-info div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mp-bar{height:4px;border-radius:2px;background:var(--track);overflow:hidden}
+  .mp-bar i{display:block;height:100%;width:0;background:var(--brand)}
+  .mp-times{display:flex;justify-content:space-between}
+  .mp-ctl{display:flex;justify-content:center;align-items:center;gap:4px}
+  .mp-ctl button{width:44px;height:44px;border:0;border-radius:50%;background:transparent;color:var(--ink);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+  .mp-ctl button:hover{background:var(--s200)}
+  .mp-ctl button.main{background:var(--ink);color:var(--s100)}
+  .mp-ctl button:disabled{opacity:.4;cursor:default}
+  .mp-open{margin-top:auto;width:100%;justify-content:center}
+  /* Mac: the system font on a see-through page (the window supplies the blur), colours for the system appearance, small rounded controls */
+  html.mac{--ink:#1d1d1f;--muted:#6e6e73;--s100:transparent;--s200:rgba(0,0,0,.07);--track:rgba(0,0,0,.14);--mainfg:#fff;--brand:#8a5a10;color-scheme:light dark}
+  @media (prefers-color-scheme:dark){html.mac{--ink:#f5f5f7;--muted:#a1a1a6;--s200:rgba(255,255,255,.12);--track:rgba(255,255,255,.22);--mainfg:#1d1d1f;--brand:#e0a951}}
+  html.mac,html.mac body{background:transparent;font:13px/18px -apple-system,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  html.mac .mp-cover{border-radius:6px}
+  html.mac .mp-ctl button.main{color:var(--mainfg)}
+  html.mac .mp-open{height:28px;padding:0 12px;border:0;border-radius:6px;background:var(--s200);font-weight:500}
+  html.mac .mp-open:hover{background:var(--track)}
+</style>
+</head>
+<body>
+<div class="mp">
+  <div class="mp-top">
+    <div class="mp-cover" id="cover"></div>
+    <div class="mp-info"><div class="strong" id="title">Nothing playing</div><div class="cap muted" id="chap"></div><div class="cap muted" id="author"></div></div>
+  </div>
+  <div><div class="mp-bar" aria-hidden="true"><i id="fill"></i></div><div class="mp-times cap muted"><span id="t0">0:00</span><span id="t1">0:00</span></div></div>
+  <div class="mp-ctl" id="ctl"></div>
+  <button class="btn mp-open" id="open">Open Lectern</button>
+</div>
+<script src="mini.js"></script>
+</body>
+</html>

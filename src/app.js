@@ -13,7 +13,7 @@ const state = {
   libId: store.get('lib', null),
   dlcfg: store.get('dlcfg', { limitGB: 10, dir: null }), // download cap in GB and chosen folder (null = app data)
   statsRange: 'year', stats: null,
-  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, ...store.get('pb', {}) }, // Settings > Playback
+  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, tray: false, ...store.get('pb', {}) }, // Settings > Playback
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
   upd: { s: 'idle' }, version: '', items: [], q: '', q0: '', pct: {}, filter: 'all', sort: 'added', bm: [], bmErr: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
@@ -147,7 +147,7 @@ ${setrow('Skip back', 'Also used by the left arrow key', 'pb-back', pills('back'
 ${setrow('Skip forward', 'Also used by the right arrow key', 'pb-fwd', pills('fwd', 'Skip forward', PB_FWD, o => o + 's'))}
 ${setrow('Default sleep timer', 'Starts when you press play, then pauses', 'pb-sleep', `<select id="pb-sleep">${[[0, 'Off'], [15, '15 minutes'], [30, '30 minutes'], [45, '45 minutes'], ['chapter', 'End of chapter']].map(([v, l]) => `<option value="${v}"${state.pb.sleep === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`)}
 ${switchRow('rewind', 'Step back after a pause', 'Rewind 10 seconds when you resume after stopping for over a minute')}
-${switchRow('autoNext', 'Play the next chapter automatically', 'Keep going at the end of a chapter instead of stopping')}</div></section>`;
+${switchRow('autoNext', 'Play the next chapter automatically', 'Keep going at the end of a chapter instead of stopping')}${T ? switchRow('tray', 'Keep playing when the window is closed', 'Closing hides Lectern in the system tray. Quit from the tray icon') : ''}</div></section>`;
 const settings = () => {
   const a = state.acct, s = state.session;
   const body = s
@@ -194,10 +194,17 @@ if (T?.window) {
   const w = T.window.getCurrentWindow(), bar = document.getElementById('titlebar');
   const WIN = { min: '<path d="M6 12h12"/>', max: '<rect x="6" y="6" width="12" height="12" rx="1"/>', restore: '<path d="M9 9V6h9v9h-3"/><rect x="6" y="9" width="9" height="9" rx="1"/>', close: '<path d="M6 6l12 12M18 6 6 18"/>' };
   const btn = (k, label) => `<button class="wbtn${k === 'close' ? ' close' : ''}" data-w="${k}" aria-label="${label}">${svg(WIN[k], 16)}</button>`;
-  bar.innerHTML = `<span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>${btn('min', 'Minimize')}<button class="wbtn" data-w="max" id="wmax" aria-label="Maximize"></button>${btn('close', 'Close')}`;
+  // on a Mac the buttons are the familiar three dots on the left (close, minimize, zoom); elsewhere they are the Windows buttons on the right
+  const DOT = { close: '<path d="M6 6l12 12M18 6 6 18"/>', min: '<path d="M5 12h14"/>', max: '<path d="M12 5v14M5 12h14"/>' };
+  const dot = (k, label) => `<button class="dot ${k}" data-w="${k}" aria-label="${label}">${svg(DOT[k], 8)}</button>`;
+  const mac = /Mac/.test(navigator.userAgent);
+  bar.classList.toggle('mac', mac);
+  bar.innerHTML = mac
+    ? `<div class="lights">${dot('close', 'Close')}${dot('min', 'Minimize')}${dot('max', 'Zoom')}</div><span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>`
+    : `<span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>${btn('min', 'Minimize')}<button class="wbtn" data-w="max" id="wmax" aria-label="Maximize"></button>${btn('close', 'Close')}`;
   bar.hidden = false;
   bar.setAttribute('data-tauri-drag-region', '');
-  const paintMax = async () => { const m = await w.isMaximized(); const b = document.getElementById('wmax'); b.innerHTML = svg(m ? WIN.restore : WIN.max, 16); b.setAttribute('aria-label', m ? 'Restore' : 'Maximize'); };
+  const paintMax = async () => { const m = await w.isMaximized(); const b = document.getElementById('wmax'); if (!b) return; b.innerHTML = svg(m ? WIN.restore : WIN.max, 16); b.setAttribute('aria-label', m ? 'Restore' : 'Maximize'); };
   bar.onclick = e => { const k = e.target.closest('[data-w]')?.dataset.w; if (k === 'min') w.minimize(); else if (k === 'max') w.toggleMaximize(); else if (k === 'close') w.close(); };
   paintMax();
   w.onResized(paintMax);
@@ -439,6 +446,8 @@ function stopPlayer() {
   document.getElementById('player').hidden = true;
   document.getElementById('player').innerHTML = '';
   paintCovers();
+  paintMedia();
+  emitMini(true);
 }
 // covers show a play/pause overlay: "now" is the loaded book, "playing" is audio actually running
 const coverCls = id => 'cover' + (player.id === id ? ' now' + (player.s && audio() && !audio().paused ? ' playing' : '') : '');
@@ -508,6 +517,34 @@ const ctl = {
   }
 };
 
+// Media keys and the system media overlay (Windows volume popup, Mac Now Playing): the webview passes navigator.mediaSession on to the OS
+const MS = navigator.mediaSession;
+const MS_KEYS = { play: () => audio().play(), pause: () => audio().pause(), previoustrack: ctl.prev, nexttrack: ctl.next, seekbackward: ctl.back, seekforward: ctl.fwd };
+for (const [k, f] of Object.entries(MS_KEYS)) try { MS?.setActionHandler(k, () => player.s && audio() && f()); } catch {}
+try { MS?.setActionHandler('seekto', d => player.s && audio() && seek(chapterSpan().start + d.seekTime)); } catch {}
+function paintMedia() {
+  const s = player.s, a = audio();
+  if (!MS) return;
+  if (!s || !a) { MS.metadata = null; MS.playbackState = 'none'; return; }
+  const sp = chapterSpan(), title = sp.c >= 0 ? s.chapters[sp.c].title : s.title;
+  MS.playbackState = a.paused ? 'paused' : 'playing';
+  if (MS.metadata?.title !== title || MS.metadata?.album !== s.title) MS.metadata = new MediaMetadata({ title, artist: s.author, album: s.title, artwork: [{ src: client().coverUrl(player.id), sizes: '400x400' }] });
+  try { MS.setPositionState({ duration: sp.end - sp.start, position: Math.min(Math.max(0, sp.t - sp.start), sp.end - sp.start), playbackRate: a.playbackRate }); } catch {} // throws while the numbers are not ready yet
+}
+
+// The tray's mini player has no audio of its own: this window sends it what is playing, about once a second and whenever it changes
+let miniKey = '';
+function emitMini(force) {
+  if (!T?.event || !state.pb.tray) return;
+  const s = player.s, a = audio();
+  let p = { has: false };
+  if (s && a) { const sp = chapterSpan(); p = { has: true, title: s.title, author: s.author, chapter: sp.c >= 0 ? s.chapters[sp.c].title : '', cover: client().coverUrl(player.id), playing: !a.paused, pos: sp.t - sp.start, dur: sp.end - sp.start, hasChapters: s.chapters.length > 0, back: state.pb.back, fwd: state.pb.fwd }; }
+  const key = p.has ? [p.title, p.chapter, p.playing, Math.floor(p.pos)].join('|') : 'none';
+  if (!force && key === miniKey) return;
+  miniKey = key;
+  T.event.emit('mini-state', p);
+}
+
 // a skip amount changed in Settings: relabel the buttons that are already on screen
 function paintSkips() {
   for (const [k, back] of [['back', true], ['fwd', false]]) {
@@ -570,6 +607,8 @@ function paintPlayer() {
   document.getElementById('np-toggle').setAttribute('aria-label', a.paused ? 'Play' : 'Pause');
   paintCovers();
   paintPage();
+  paintMedia();
+  emitMini();
 }
 
 async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
@@ -701,7 +740,7 @@ const act = {
     paintBm(); return true;
   },
   finish: async d => { await client().setFinished(d.id, d.v === '1').catch(() => {}); render(); return true; },
-  pbtoggle: d => { state.pb[d.v] = !state.pb[d.v]; savePb(); },
+  pbtoggle: d => { state.pb[d.v] = !state.pb[d.v]; savePb(); if (d.v === 'tray') applyTray(); },
   pk: d => { ctl[d.v]?.(); return true; },
   prate: d => { ctl.rate(+d.v); paintPage(); return true; },
   pch: d => { seek(player.s.chapters[d.v].start); return true; },
@@ -769,8 +808,11 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('error', e => e.target.classList?.contains('cover-img') && e.target.remove(), true);
 // the Windows taskbar thumbnail has skip back, play/pause and skip forward buttons: clicks arrive as events, the play state goes back
+const applyTray = () => T?.core?.invoke('close_to_tray', { on: state.pb.tray }).catch(() => {});
+applyTray();
 const taskbarPlaying = playing => { T?.core?.invoke('taskbar_playing', { playing }).catch(() => {}); };
 T?.event?.listen('taskbar', e => { if (player.s && audio()) ctl[e.payload]?.(); });
+T?.event?.listen('mini-ready', () => emitMini(true));
 
 // space toggles play/pause and the arrow keys skip, unless the key belongs to what has focus (typing, a list, a slider, or a button that space already activates)
 document.addEventListener('keydown', e => {
