@@ -39,6 +39,8 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: npx tauri
           tagName: ${{ github.ref_name }}
@@ -46,3 +48,24 @@ jobs:
           releaseBody: 'Download the installer for your system below. The installers are not code-signed, so Windows and macOS will warn the first time you open them.'
           releaseDraft: true
           args: ${{ matrix.args }}
+
+  # The repo is private, so the app reads latest.json from the 'updates' branch with a token and downloads installers by API url.
+  # When the repo goes public this job can go: tauri-action's own latest.json works as is.
+  updates:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: node scripts/latest-json.js ${{ github.ref_name }} > $RUNNER_TEMP/latest.json
+      - run: |
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git switch --orphan updates
+          cp $RUNNER_TEMP/latest.json latest.json
+          git add latest.json
+          git commit -m 'Update info for ${{ github.ref_name }}'
+          git push --force origin updates

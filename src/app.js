@@ -15,7 +15,7 @@ const state = {
   statsRange: 'year', stats: null,
   pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, ...store.get('pb', {}) }, // Settings > Playback
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
-  version: '', items: [], q: '', q0: '', pct: {}, filter: 'all', sort: 'added', bm: [], bmErr: '',
+  upd: { s: 'idle' }, version: '', items: [], q: '', q0: '', pct: {}, filter: 'all', sort: 'added', bm: [], bmErr: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
 };
 const client = () => absClient(tfetch, state.session);
@@ -171,13 +171,24 @@ ${setrow('Offline storage limit', `${bytes(dl.bytes())} used right now. Books th
 ${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder')} · applies to new downloads`, 'dlchoose', `<div class="row g8" style="align-items:center"><button class="btn" id="dlchoose" data-act="dlchoose">Choose folder</button>${state.dlcfg.dir ? '<button class="btn" data-act="dlreset">Use default</button>' : ''}</div>`)}` : ''}</div></section>`;
   const keys = `<section class="col g12"><h2>Keyboard shortcuts</h2><div class="card panel">${[['Play or pause', ['Space']], ['Skip back or forward', ['Left', 'Right']], ['Volume up or down', ['Up', 'Down']]].map(([a, k]) => `<div class="setrow"><span>${a}</span><span class="row g4" style="flex-wrap:nowrap">${k.map(x => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div></section>`;
   const appearance = `<section class="col g12"><h2>Appearance</h2><div class="card panel">${setrow('Theme', 'Choose light or dark', 'th-light', `<div class="row g8" role="group" aria-label="Theme">${['light', 'dark'].map(t => `<button class="seg" id="th-${t}" data-act="settheme" data-v="${t}" aria-pressed="${state.theme === t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>`)}</div></section>`;
-  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}${appearance}${keys}</div>`;
+  const updates = `<section class="col g12"><h2>Updates</h2><div class="card panel"><div id="updstat">${updStatus()}</div>${setrow('GitHub token', 'Read-only access to the Lectern repository. Kept on this computer only', 'upd-token', `<input id="upd-token" type="password" autocomplete="off" placeholder="github_pat_…" value="${esc(store.get('ghtoken', ''))}">`)}</div></section>`;
+  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}${appearance}${updates}${keys}</div>`;
 };
+// Settings > Updates: the status row repaints on its own so typing in the token field is not interrupted
+const UPD_TEXT = { idle: '', checking: 'Checking…', current: 'You have the latest version', notoken: 'Add a GitHub token below first' };
+function updStatus() {
+  const u = state.upd, busy = u.s === 'checking' || u.s === 'downloading';
+  const text = u.s === 'available' ? `Version ${esc(u.version)} is available` : u.s === 'downloading' ? `Downloading… ${Math.round(u.pct * 100)}%` : u.s === 'error' ? esc(u.msg) : UPD_TEXT[u.s];
+  const btn = !updater ? '' : u.s === 'available' ? '<button class="btn primary" id="updinstall" data-act="updinstall">Update and restart</button>' : `<button class="btn" id="updcheck" data-act="updcheck"${busy ? ' disabled' : ''}>Check for updates</button>`;
+  return `<div class="setrow"><div class="info"><div class="strong">Version ${esc(state.version || '')}</div><div class="cap ${u.s === 'error' ? 'danger' : 'muted'}" id="updmsg" role="status">${updater ? text : 'Updates are only available in the desktop app'}</div></div>${btn}</div>${u.s === 'available' && u.notes ? `<div class="setrow"><div class="cap muted" style="white-space:pre-wrap">${esc(u.notes)}</div></div>` : ''}`;
+}
+const paintUpd = () => { const el = document.getElementById('updstat'); if (el) el.innerHTML = updStatus(); };
 
 // ---- downloads: offline copies in the app data folder (desktop app only) ----
 const T = window.__TAURI__;
 // the version comes from tauri.conf.json (set with npm run version:set), so the app shows what was built
 T?.app?.getVersion().then(v => { state.version = v; const el = document.getElementById('appver'); if (el) el.textContent = 'Version ' + v; }).catch(() => {});
+const updater = T?.updater && T?.process ? makeUpdater({ check: T.updater.check, relaunch: T.process.relaunch, token: () => store.get('ghtoken', ''), onState: s => { state.upd = s; paintUpd(); } }) : null;
 // the window has no system title bar (decorations are off), so the app draws its own: drag area plus minimize, maximize, close
 if (T?.window) {
   const w = T.window.getCurrentWindow(), bar = document.getElementById('titlebar');
@@ -674,6 +685,8 @@ const savePb = () => { store.set('pb', state.pb); paintSkips(); dl?.pump(); };
 const act = {
   pb: d => { state.pb[d.k] = +d.v; savePb(); },
   filter: d => { state.filter = d.v; paintLib(); return true; },
+  updcheck: () => { updater?.check(); return true; },
+  updinstall: () => { updater?.install(); return true; },
   settheme: d => { state.theme = d.v; store.set('theme', d.v); },
   sleepmenu: () => { toggleMenu('sleep'); return true; },
   sleep: d => { setSleep(d.v === 'chapter' ? 'chapter' : +d.v); toggleMenu(); paintPage(); return true; },
@@ -743,6 +756,7 @@ document.addEventListener('submit', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'sort') { state.sort = e.target.value; paintLib(); }
+  if (e.target.id === 'upd-token') { store.set('ghtoken', e.target.value.trim()); if (state.upd.s === 'notoken') state.upd = { s: 'idle' }; paintUpd(); }
   if (e.target.id === 'dllimit') { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); dl?.pump(); }
   if (e.target.id === 'pb-sleep') { state.pb.sleep = e.target.value === 'chapter' ? 'chapter' : +e.target.value; savePb(); } if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
