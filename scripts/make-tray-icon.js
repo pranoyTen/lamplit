@@ -1,14 +1,14 @@
-// Draws the Mac menu bar icon: an open book in solid black on transparent. macOS tints a "template" image to suit the menu bar,
+// Draws the Mac menu bar icon: the bookmark ribbon from the app icon in solid black on transparent. macOS tints a "template" image to suit the menu bar,
 // so only the shape (the alpha) matters. Run: node scripts/make-tray-icon.js   ->  src-tauri/icons/tray.png
 const fs = require('node:fs');
 const zlib = require('node:zlib');
 const path = require('node:path');
 
 const N = 44, SS = 4;
-// point-in-polygon for the two pages of the book, on a 44 x 44 grid
+// point-in-polygon for the ribbon, on a 44 x 44 grid
 const inside = (x, y, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
-const LEFT = [[5, 11], [21, 14], [21, 34], [5, 31]], RIGHT = [[23, 14], [39, 11], [39, 31], [23, 34]];
-const glyph = (x, y) => inside(x, y, LEFT) || inside(x, y, RIGHT);
+const RIBBON = [[14, 7], [30, 7], [30, 36], [22, 28], [14, 36]]; // same proportions as the ribbon in icon.png: about 1:1.8 with a notch
+const glyph = (x, y) => inside(x, y, RIBBON);
 
 const raw = Buffer.alloc((N * 4 + 1) * N);
 for (let y = 0; y < N; y++) {
