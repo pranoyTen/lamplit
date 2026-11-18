@@ -14,6 +14,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.icns", "icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_PUBLIC_KEY",
+      "endpoints": ["https://raw.githubusercontent.com/pranoyTen/lectern/updates/latest.json"]
+    }
   }
 }
