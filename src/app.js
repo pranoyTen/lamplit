@@ -194,10 +194,17 @@ if (T?.window) {
   const w = T.window.getCurrentWindow(), bar = document.getElementById('titlebar');
   const WIN = { min: '<path d="M6 12h12"/>', max: '<rect x="6" y="6" width="12" height="12" rx="1"/>', restore: '<path d="M9 9V6h9v9h-3"/><rect x="6" y="9" width="9" height="9" rx="1"/>', close: '<path d="M6 6l12 12M18 6 6 18"/>' };
   const btn = (k, label) => `<button class="wbtn${k === 'close' ? ' close' : ''}" data-w="${k}" aria-label="${label}">${svg(WIN[k], 16)}</button>`;
-  bar.innerHTML = `<span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>${btn('min', 'Minimize')}<button class="wbtn" data-w="max" id="wmax" aria-label="Maximize"></button>${btn('close', 'Close')}`;
+  // on a Mac the buttons are the familiar three dots on the left (close, minimize, zoom); elsewhere they are the Windows buttons on the right
+  const DOT = { close: '<path d="M6 6l12 12M18 6 6 18"/>', min: '<path d="M5 12h14"/>', max: '<path d="M12 5v14M5 12h14"/>' };
+  const dot = (k, label) => `<button class="dot ${k}" data-w="${k}" aria-label="${label}">${svg(DOT[k], 8)}</button>`;
+  const mac = /Mac/.test(navigator.userAgent);
+  bar.classList.toggle('mac', mac);
+  bar.innerHTML = mac
+    ? `<div class="lights">${dot('close', 'Close')}${dot('min', 'Minimize')}${dot('max', 'Zoom')}</div><span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>`
+    : `<span class="wtitle">Lectern</span><div class="wspace" data-tauri-drag-region></div>${btn('min', 'Minimize')}<button class="wbtn" data-w="max" id="wmax" aria-label="Maximize"></button>${btn('close', 'Close')}`;
   bar.hidden = false;
   bar.setAttribute('data-tauri-drag-region', '');
-  const paintMax = async () => { const m = await w.isMaximized(); const b = document.getElementById('wmax'); b.innerHTML = svg(m ? WIN.restore : WIN.max, 16); b.setAttribute('aria-label', m ? 'Restore' : 'Maximize'); };
+  const paintMax = async () => { const m = await w.isMaximized(); const b = document.getElementById('wmax'); if (!b) return; b.innerHTML = svg(m ? WIN.restore : WIN.max, 16); b.setAttribute('aria-label', m ? 'Restore' : 'Maximize'); };
   bar.onclick = e => { const k = e.target.closest('[data-w]')?.dataset.w; if (k === 'min') w.minimize(); else if (k === 'max') w.toggleMaximize(); else if (k === 'close') w.close(); };
   paintMax();
   w.onResized(paintMax);
