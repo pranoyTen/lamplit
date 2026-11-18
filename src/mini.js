@@ -2,7 +2,10 @@
 // "taskbar" commands the Windows thumbnail buttons use (prev, back, toggle, fwd, next).
 const T = window.__TAURI__;
 const $ = id => document.getElementById(id);
-try { const th = JSON.parse(localStorage.getItem('lectern.theme')); if (th) document.documentElement.dataset.theme = th; } catch {}
+// on a Mac the window is native glass and follows the system light/dark setting; elsewhere it follows the app's theme
+const mac = /Mac/.test(navigator.userAgent);
+document.documentElement.classList.toggle('mac', mac);
+if (!mac) try { const th = JSON.parse(localStorage.getItem('lectern.theme')); if (th) document.documentElement.dataset.theme = th; } catch {}
 
 const svg = d => `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const skip = (n, back) => svg(`<path d="${back ? 'M4 12a8 8 0 1 1 2.5 5.8M4 5v5h5' : 'M20 12a8 8 0 1 0-2.5 5.8M20 5v5h-5'}"/><text x="12" y="15" font-size="8" text-anchor="middle" fill="currentColor" stroke="none">${n}</text>`);

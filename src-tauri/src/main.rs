@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::utils::config::WindowEffectsConfig;
+use tauri::window::{Effect, EffectState};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_fs::FsExt;
 
@@ -50,16 +52,19 @@ fn mini(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     if let Some(w) = app.get_webview_window("mini") {
         return Some(w);
     }
-    WebviewWindowBuilder::new(app, "mini", WebviewUrl::App("mini.html".into()))
+    let mut b = WebviewWindowBuilder::new(app, "mini", WebviewUrl::App("mini.html".into()))
         .title("Lectern")
         .inner_size(MINI_W, MINI_H)
         .decorations(false)
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .visible(false)
-        .build()
-        .ok()
+        .visible(false);
+    // on a Mac the popover is native glass: a transparent window with the system popover blur and rounded corners (the page paints no background)
+    if cfg!(target_os = "macos") {
+        b = b.transparent(true).effects(WindowEffectsConfig { effects: vec![Effect::Popover], state: Some(EffectState::Active), radius: Some(12.0), color: None, interactive: false });
+    }
+    b.build().ok()
 }
 
 fn toggle_mini(app: &tauri::AppHandle, icon: tauri::Rect) {
