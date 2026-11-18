@@ -3,10 +3,11 @@
 #[cfg(windows)]
 mod taskbar;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_fs::FsExt;
 
 // Lets the app read and write one more folder (the user's chosen download location) and play audio from it.
@@ -35,6 +36,66 @@ fn show_window(app: &tauri::AppHandle) {
     }
 }
 
+// The mini player: a small window shown under (or, with the tray at the bottom of the screen, above) the tray icon. It is made the first time
+// it is needed and then only hidden. It hides itself when it loses focus; a click on the icon that caused that is ignored for a moment so it
+// does not pop straight back open.
+static MINI_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
+const MINI_W: f64 = 340.0;
+const MINI_H: f64 = 268.0;
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+fn mini(app: &tauri::AppHandle) -> Option<WebviewWindow> {
+    if let Some(w) = app.get_webview_window("mini") {
+        return Some(w);
+    }
+    WebviewWindowBuilder::new(app, "mini", WebviewUrl::App("mini.html".into()))
+        .title("Lectern")
+        .inner_size(MINI_W, MINI_H)
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()
+        .ok()
+}
+
+fn toggle_mini(app: &tauri::AppHandle, icon: tauri::Rect) {
+    let Some(w) = mini(app) else { return };
+    if w.is_visible().unwrap_or(false) {
+        let _ = w.hide();
+        return;
+    }
+    if now_ms().saturating_sub(MINI_HIDDEN_AT.load(Ordering::Relaxed)) < 300 {
+        return;
+    }
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let (p, s) = (icon.position.to_physical::<f64>(scale), icon.size.to_physical::<f64>(scale));
+    let (ww, wh) = (MINI_W * scale, MINI_H * scale);
+    let mon = app.monitor_from_point(p.x, p.y).ok().flatten().or_else(|| app.primary_monitor().ok().flatten());
+    let mut x = p.x + s.width / 2.0 - ww / 2.0;
+    let mut y = if mon.as_ref().map_or(true, |m| p.y < m.position().y as f64 + m.size().height as f64 / 2.0) { p.y + s.height + 4.0 * scale } else { p.y - wh - 4.0 * scale };
+    if let Some(m) = &mon {
+        let (mx, my, mw, mh) = (m.position().x as f64, m.position().y as f64, m.size().width as f64, m.size().height as f64);
+        x = x.clamp(mx + 8.0 * scale, (mx + mw - ww - 8.0 * scale).max(mx));
+        y = y.clamp(my, (my + mh - wh).max(my));
+    }
+    let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+    let _ = w.show();
+    let _ = w.set_focus();
+}
+
+// the mini player's Open button: bring the full window back and put the mini player away
+#[tauri::command]
+fn show_main(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("mini") {
+        let _ = w.hide();
+    }
+    show_window(&app);
+}
+
 // With "keep playing when closed" on, closing the window hides it and a tray icon stays; the icon's menu shows the window, toggles
 // play/pause (as a "taskbar" event, the same one the Windows thumbnail buttons send) or quits. Off removes the icon again.
 #[tauri::command]
@@ -61,8 +122,8 @@ fn close_to_tray(app: tauri::AppHandle, on: bool) -> Result<(), String> {
         _ => app.exit(0),
     })
     .on_tray_icon_event(|tray, e| {
-        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-            show_window(tray.app_handle());
+        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
+            toggle_mini(tray.app_handle(), rect);
         }
     })
     .build(&app)
@@ -72,13 +133,16 @@ fn close_to_tray(app: tauri::AppHandle, on: bool) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
-        .on_window_event(|w, e| {
-            if let WindowEvent::CloseRequested { api, .. } = e {
-                if CLOSE_TO_TRAY.load(Ordering::Relaxed) {
-                    api.prevent_close();
-                    let _ = w.hide();
-                }
+        .on_window_event(|w, e| match e {
+            WindowEvent::CloseRequested { api, .. } if CLOSE_TO_TRAY.load(Ordering::Relaxed) => {
+                api.prevent_close();
+                let _ = w.hide();
             }
+            WindowEvent::Focused(false) if w.label() == "mini" => {
+                MINI_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
+                let _ = w.hide();
+            }
+            _ => {}
         })
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
@@ -93,7 +157,7 @@ fn main() {
             let _ = app;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![allow_dir, taskbar_playing, close_to_tray])
+        .invoke_handler(tauri::generate_handler![allow_dir, taskbar_playing, close_to_tray, show_main])
         .run(tauri::generate_context!())
         .expect("error while running Lectern");
 }

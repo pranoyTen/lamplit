@@ -447,6 +447,7 @@ function stopPlayer() {
   document.getElementById('player').innerHTML = '';
   paintCovers();
   paintMedia();
+  emitMini(true);
 }
 // covers show a play/pause overlay: "now" is the loaded book, "playing" is audio actually running
 const coverCls = id => 'cover' + (player.id === id ? ' now' + (player.s && audio() && !audio().paused ? ' playing' : '') : '');
@@ -531,6 +532,19 @@ function paintMedia() {
   try { MS.setPositionState({ duration: sp.end - sp.start, position: Math.min(Math.max(0, sp.t - sp.start), sp.end - sp.start), playbackRate: a.playbackRate }); } catch {} // throws while the numbers are not ready yet
 }
 
+// The tray's mini player has no audio of its own: this window sends it what is playing, about once a second and whenever it changes
+let miniKey = '';
+function emitMini(force) {
+  if (!T?.event || !state.pb.tray) return;
+  const s = player.s, a = audio();
+  let p = { has: false };
+  if (s && a) { const sp = chapterSpan(); p = { has: true, title: s.title, author: s.author, chapter: sp.c >= 0 ? s.chapters[sp.c].title : '', cover: client().coverUrl(player.id), playing: !a.paused, pos: sp.t - sp.start, dur: sp.end - sp.start, hasChapters: s.chapters.length > 0, back: state.pb.back, fwd: state.pb.fwd }; }
+  const key = p.has ? [p.title, p.chapter, p.playing, Math.floor(p.pos)].join('|') : 'none';
+  if (!force && key === miniKey) return;
+  miniKey = key;
+  T.event.emit('mini-state', p);
+}
+
 // a skip amount changed in Settings: relabel the buttons that are already on screen
 function paintSkips() {
   for (const [k, back] of [['back', true], ['fwd', false]]) {
@@ -594,6 +608,7 @@ function paintPlayer() {
   paintCovers();
   paintPage();
   paintMedia();
+  emitMini();
 }
 
 async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
@@ -797,6 +812,7 @@ const applyTray = () => T?.core?.invoke('close_to_tray', { on: state.pb.tray }).
 applyTray();
 const taskbarPlaying = playing => { T?.core?.invoke('taskbar_playing', { playing }).catch(() => {}); };
 T?.event?.listen('taskbar', e => { if (player.s && audio()) ctl[e.payload]?.(); });
+T?.event?.listen('mini-ready', () => emitMini(true));
 
 // space toggles play/pause and the arrow keys skip, unless the key belongs to what has focus (typing, a list, a slider, or a button that space already activates)
 document.addEventListener('keydown', e => {
