@@ -275,15 +275,18 @@ impl Client {
         self.call(reqwest::Method::PATCH, &format!("/api/me/progress/{id}"), Some(json!({ "isFinished": finished }))).map(|_| ())
     }
 
-    /// A cover, decoded and scaled to fit `size` × `size`, as RGBA pixels.
+    /// A cover as the square the app shows: the original image, scaled so its shorter side is `size` and cropped to the middle.
+    /// Covers are often taller than wide (400 × 730 is common); fitting the whole image into the square instead left it narrow, and
+    /// the square slot then stretched it, which blurred it.
     pub fn cover(&self, id: &str, size: u32) -> Result<image::RgbaImage, String> {
-        let res = self.http.get(format!("{}/api/items/{id}/cover?width={size}", self.base)).bearer_auth(&self.token).send().map_err(|e| e.to_string())?;
+        // the original: asking the server for a width it doesn't have makes it upscale the image itself
+        let res = self.http.get(format!("{}/api/items/{id}/cover", self.base)).bearer_auth(&self.token).send().map_err(|e| e.to_string())?;
         if !res.status().is_success() {
             return Err(format!("no cover ({})", res.status()));
         }
         let bytes = res.bytes().map_err(|e| e.to_string())?;
         let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-        Ok(img.thumbnail(size, size).to_rgba8())
+        Ok(square(&img, size))
     }
 
     /// Opens a playback session: where the server last left off, and the audio files in play order.
@@ -377,5 +380,22 @@ mod tests {
     fn descriptions_become_plain_text() {
         assert_eq!(super::plain_text("<p>One &amp; two.</p><p>Three<br/>four</p>"), "One & two.\nThree\nfour");
         assert_eq!(super::plain_text("No tags"), "No tags");
+    }
+}
+
+/// Scales an image so its shorter side is `size` (a high-quality filter, as browsers use) and crops the middle `size` × `size`.
+pub fn square(img: &image::DynamicImage, size: u32) -> image::RgbaImage {
+    img.resize_to_fill(size, size, image::imageops::FilterType::Lanczos3).to_rgba8()
+}
+
+#[cfg(test)]
+mod cover_tests {
+    #[test]
+    fn tall_covers_fill_the_square() {
+        let tall = image::DynamicImage::new_rgba8(400, 730);
+        let s = super::square(&tall, 420);
+        assert_eq!(s.dimensions(), (420, 420)); // was 230 × 420 before, then stretched on screen
+        let small = super::square(&image::DynamicImage::new_rgba8(1000, 1000), 300);
+        assert_eq!(small.dimensions(), (300, 300));
     }
 }
