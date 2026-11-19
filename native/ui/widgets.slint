@@ -73,17 +73,14 @@ export component Clickable {
         }
     }
     forward-focus: fs;
-    @children
-    ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: root.enabled ? pointer : default;
-        clicked => {
-            fs.focus();
-            root.clicked();
-        }
-    }
+    // the focus scope sits under the touch area and does not take focus on click: on top, or focusing on click, it swallows the
+    // first click; the ring shows only when focus arrives with Tab
+    property <bool> keyboard-focus;
     fs := FocusScope {
         enabled: root.enabled;
+        focus-on-click: false;
+        focus-gained(reason) => { root.keyboard-focus = reason == FocusReason.tab-navigation; }
+        focus-lost => { root.keyboard-focus = false; }
         key-pressed(e) => {
             if e.text == " " || e.text == "\n" {
                 root.clicked();
@@ -92,7 +89,13 @@ export component Clickable {
             reject
         }
     }
-    if fs.has-focus && !ta.pressed: FocusRing { radius: root.radius; w: root.width; h: root.height; }
+    @children
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    if root.keyboard-focus: FocusRing { radius: root.radius; w: root.width; h: root.height; }
 }
 
 export component Btn inherits Clickable {

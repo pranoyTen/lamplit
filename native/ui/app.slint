@@ -91,11 +91,11 @@ export component AppWindow inherits Window {
             }
             Rectangle {
                 vertical-stretch: 1;
-                if State.route == "home": HomePage {}
-                if State.route == "library": LibraryPage {}
-                if State.route == "book": BookScreen {}
-                if State.route == "player": PlayerPage {}
-                if State.route == "settings": SettingsPage { server <=> root.server; }
+                if State.route == "home": HomePage { width: 100%; height: 100%; }
+                if State.route == "library": LibraryPage { width: 100%; height: 100%; }
+                if State.route == "book": BookScreen { width: 100%; height: 100%; }
+                if State.route == "player": PlayerPage { width: 100%; height: 100%; }
+                if State.route == "settings": SettingsPage { width: 100%; height: 100%; server <=> root.server; }
             }
             if State.has-book && State.route != "player": PlayerBar {
                 open-player => {

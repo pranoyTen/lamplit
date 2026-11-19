@@ -16,7 +16,7 @@ component BookTile {
             height: self.width;
             radius: 4px;
             clicked => { root.play(); }
-            Cover { img: root.book.cover; title: root.book.title; tint: root.book.tint; }
+            Cover { width: 100%; height: 100%; img: root.book.cover; title: root.book.title; tint: root.book.tint; }
             Rectangle {
                 border-radius: 4px;
                 background: #00000073;
@@ -87,6 +87,8 @@ export component Pill inherits Clickable {
 
 export component HomePage {
     sv := ScrollView {
+        width: 100%;
+        height: 100%;
         VerticalLayout {
             width: sv.visible-width;
             padding: 32px;
@@ -98,12 +100,14 @@ export component HomePage {
                     spacing: 24px;
                     Clickable {
                         label: "Play " + State.hero.title;
-                        width: 184px;
-                        height: 184px;
+                        width: clamp((sv.visible-width - 64px) * 0.28, 96px, 184px); // shrinks in a narrow window so the text keeps its room
+                        height: self.width;
                         clicked => { State.play-book(State.hero.id); }
-                        Cover { img: State.hero.cover; title: State.hero.title; tint: State.hero.tint; }
+                        Cover { width: 100%; height: 100%; img: State.hero.cover; title: State.hero.title; tint: State.hero.tint; }
                     }
                     VerticalLayout {
+                        min-width: 0; // long titles wrap instead of widening the page
+                        horizontal-stretch: 1;
                         spacing: 16px;
                         alignment: center;
                         VerticalLayout {
@@ -145,37 +149,35 @@ export component HomePage {
 
 export component LibraryPage {
     sv := ScrollView {
+        width: 100%;
+        height: 100%;
         VerticalLayout {
             width: sv.visible-width;
             padding: 32px;
             spacing: 24px;
             alignment: start;
+            VerticalLayout {
+                H1 { text: "Library"; }
+                Muted { text: State.library-count; }
+            }
+            // the search box gives up width first, so the page never gets wider than a narrow window
             HorizontalLayout {
-                spacing: 16px;
-                VerticalLayout {
-                    alignment: end;
-                    H1 { text: "Library"; }
-                    Muted { text: State.library-count; }
+                spacing: 12px;
+                LineEdit {
+                    min-width: 140px;
+                    max-width: 320px;
+                    horizontal-stretch: 1;
+                    placeholder-text: "Search";
+                    text <=> State.query;
+                    edited => { State.refresh-library(); }
                 }
-                Rectangle { horizontal-stretch: 1; }
-                VerticalLayout {
-                    alignment: end;
-                    LineEdit {
-                        width: 240px;
-                        placeholder-text: "Search";
-                        text <=> State.query;
-                        edited => { State.refresh-library(); }
-                    }
+                ComboBox {
+                    width: 168px;
+                    model: ["Title", "Author", "Recently added", "Longest"];
+                    current-index <=> State.sort;
+                    selected => { State.refresh-library(); }
                 }
-                VerticalLayout {
-                    alignment: end;
-                    ComboBox {
-                        width: 180px;
-                        model: ["Title", "Author", "Recently added", "Longest"];
-                        current-index <=> State.sort;
-                        selected => { State.refresh-library(); }
-                    }
-                }
+                Rectangle { horizontal-stretch: 0.001; }
             }
             HorizontalLayout {
                 spacing: 8px;
@@ -202,6 +204,8 @@ export component LibraryPage {
 
 export component BookScreen {
     sv := ScrollView {
+        width: 100%;
+        height: 100%;
         VerticalLayout {
             width: sv.visible-width;
             padding: 32px;
@@ -270,6 +274,8 @@ export component SettingsPage {
     property <string> user;
     property <string> pass;
     sv := ScrollView {
+        width: 100%;
+        height: 100%;
         VerticalLayout {
             width: sv.visible-width;
             padding: 32px;
