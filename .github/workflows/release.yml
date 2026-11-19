@@ -28,7 +28,7 @@ jobs:
 
       - name: Tag must match the app version
         shell: bash
-        run: test "v$(node -p "require('./src-tauri/tauri.conf.json').version")" = "$GITHUB_REF_NAME"
+        run: test "v$(node -p "require('./src-tauri/tauri.conf.json').version")" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match the app version in tauri.conf.json"; exit 1; }
 
       - uses: dtolnay/rust-toolchain@stable
         with:
