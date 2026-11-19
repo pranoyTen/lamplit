@@ -8,9 +8,22 @@ const sigs = { 'Lectern_1.2.0_x64-setup.exe': 'SIGWIN\n', 'Lectern_universal.app
 test('points each platform at its API asset url with its signature', () => {
   const j = latestJson({ tag: 'v1.2.0', notes: 'Fixes', repo: 'me/lectern', assets, sigs });
   assert.equal(j.version, '1.2.0');
-  assert.deepEqual(j.platforms['windows-x86_64'], { signature: 'SIGWIN', url: 'https://api.github.com/repos/me/lectern/releases/assets/11' });
+  assert.deepEqual(j.platforms['windows-x86_64'], { signature: 'SIGWIN', url: 'https://api.github.com/repos/me/lectern/releases/assets/11', format: 'nsis' });
   assert.equal(j.platforms['darwin-aarch64'].url, 'https://api.github.com/repos/me/lectern/releases/assets/13');
+  assert.equal(j.platforms['darwin-aarch64'].format, 'app');
   assert.deepEqual(j.platforms['darwin-x86_64'], j.platforms['darwin-aarch64']);
+});
+
+test('a native (2.x) release gives each Mac chip its own build', () => {
+  const native = [{ id: 21, name: 'lectern_2.0.0_x64-setup.exe' }, { id: 22, name: 'lectern_2.0.0_x64-setup.exe.sig' },
+    { id: 23, name: 'Lectern_aarch64.app.tar.gz' }, { id: 24, name: 'Lectern_aarch64.app.tar.gz.sig' },
+    { id: 25, name: 'Lectern_x64.app.tar.gz' }, { id: 26, name: 'Lectern_x64.app.tar.gz.sig' }];
+  const s = { 'lectern_2.0.0_x64-setup.exe': 'W', 'Lectern_aarch64.app.tar.gz': 'A', 'Lectern_x64.app.tar.gz': 'I' };
+  const j = latestJson({ tag: 'v2.0.0', repo: 'me/lectern', assets: native, sigs: s });
+  assert.equal(j.platforms['windows-x86_64'].signature, 'W');
+  assert.equal(j.platforms['darwin-aarch64'].url, 'https://api.github.com/repos/me/lectern/releases/assets/23');
+  assert.equal(j.platforms['darwin-x86_64'].url, 'https://api.github.com/repos/me/lectern/releases/assets/25');
+  assert.equal(j.platforms['darwin-x86_64'].signature, 'I');
 });
 
 test('a missing signed file fails the build instead of publishing a broken update', () => {

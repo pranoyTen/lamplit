@@ -13,6 +13,7 @@ mod mini;
 mod player;
 mod stats;
 mod stretch;
+mod updater;
 
 use api::{Book, Client, Details};
 use book::{Bookmark, Chapter, Sleep};
@@ -71,6 +72,7 @@ struct App {
     downloaded: HashSet<String>, // finished downloads, for the Library's Downloaded filter
     prefs: Prefs,
     places: HashMap<String, f64>, // where each book was left, kept here for listening offline
+    update: Option<std::sync::Arc<cargo_packager_updater::Update>>, // a newer release found by the last check
     gains: Arc<eq::Gains>,
     eq_model: Rc<VecModel<f32>>,
     paused_at: Option<Instant>, // when playback was last paused, for the rewind after a long pause
@@ -89,11 +91,12 @@ struct Prefs {
     rewind: bool,
     auto_next: bool,
     eq: [f32; 5],
+    gh_token: String, // shortcut: kept in the settings file like the Tauri app kept it; drop it once the repository is public
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false, back: 15, fwd: 30, rewind: true, auto_next: true, eq: [0.0; 5] }
+        Prefs { dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false, back: 15, fwd: 30, rewind: true, auto_next: true, eq: [0.0; 5], gh_token: String::new() }
     }
 }
 
@@ -1029,6 +1032,52 @@ fn remove_bookmark(i: usize) {
     });
 }
 
+// ---- updates ----
+fn upd_status(busy: bool, status: &str, available: &str) {
+    if let Some(ui) = window() {
+        let st = ui.global::<State>();
+        st.set_upd_busy(busy);
+        st.set_upd_status(status.into());
+        st.set_upd_available(available.into());
+    }
+}
+
+fn check_updates() {
+    let token = with_app(|a| a.prefs.gh_token.clone());
+    upd_status(true, "Checking…", "");
+    background(move || updater::check(&token), |r| match r {
+        Ok(Some(u)) => {
+            let (v, notes) = (u.version.clone(), u.body.clone().unwrap_or_default());
+            with_app(|a| a.update = Some(std::sync::Arc::new(u)));
+            upd_status(false, &notes, &v);
+        }
+        Ok(None) => upd_status(false, &format!("Lectern {} is the latest version", updater::current()), ""),
+        Err(e) => upd_status(false, &e, ""),
+    });
+}
+
+/// Saves the listening place, then downloads, checks and installs the update. The installer replaces the app; on a Mac the new copy
+/// is opened before this one quits.
+fn install_update() {
+    let Some(u) = with_app(|a| a.update.clone()) else { return };
+    if let Some(t) = stop_book() {
+        let _ = t.join();
+    }
+    upd_status(true, "Downloading the update…", &u.version);
+    background(move || updater::install(&u).map(|_| u), |r| match r {
+        Ok(_) => {
+            if cfg!(target_os = "macos") {
+                // …/Lectern.app/Contents/MacOS/lectern → …/Lectern.app
+                if let Some(app) = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(3).map(|a| a.to_path_buf())) {
+                    let _ = std::process::Command::new("open").arg("-n").arg(app).spawn();
+                }
+            }
+            let _ = slint::quit_event_loop();
+        }
+        Err(e) => upd_status(false, &e, ""),
+    });
+}
+
 // ---- the tray mini player ----
 #[derive(Default)]
 struct MiniState {
@@ -1096,7 +1145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             library: library.clone(), continuing: continuing.clone(), recent: recent.clone(), covers, playing: None, speed: prefs.speed,
             series: vec![], series_model: series_model.clone(), series_books: series_books.clone(), finished_model: finished_model.clone(), listening: None,
             media: None, shown: (None, Instant::now()), dl, downloaded: HashSet::new(), prefs: prefs.clone(),
-            places: load_json("places.json").unwrap_or_default(), gains: gains.clone(), eq_model: eq_model.clone(), paused_at: None,
+            places: load_json("places.json").unwrap_or_default(), gains: gains.clone(), eq_model: eq_model.clone(), paused_at: None, update: None,
         })
     });
 
@@ -1226,6 +1275,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.on_show_series(show_series);
     st.on_open_series(|id| open_series(id.to_string()));
     st.on_show_stats(show_stats);
+    st.set_version(updater::current().into());
+    st.set_gh_token(prefs.gh_token.clone().into());
+    st.on_save_token(|| {
+        if let Some(ui) = window() {
+            let t = ui.global::<State>().get_gh_token().trim().to_string();
+            with_app(|a| a.prefs.gh_token = t);
+            save_prefs();
+        }
+    });
+    st.on_check_updates(check_updates);
+    st.on_install_update(install_update);
 
     st.on_toggle(toggle);
     st.on_skip(|d| skip(d as f64));

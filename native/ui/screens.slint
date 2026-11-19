@@ -451,6 +451,42 @@ export component SettingsPage {
             VerticalLayout {
                 spacing: 12px;
                 max-width: 640px;
+                H2 { text: "Updates"; }
+                Card {
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 16px;
+                        Text { text: "Lectern " + State.version; color: Theme.ink; }
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "GitHub token"; color: Theme.ink; }
+                            Muted { text: "Lectern's releases are private for now, so checking for updates needs a read-only token"; font-size: 12px; wrap: word-wrap; }
+                        }
+                        LineEdit {
+                            placeholder-text: "github_pat_…";
+                            input-type: InputType.password;
+                            text <=> State.gh-token;
+                            edited => { State.save-token(); }
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: start;
+                            Btn { small: true; text: "Check for updates"; enabled: !State.upd-busy; clicked => { State.check-updates(); } }
+                            if State.upd-available != "": Btn {
+                                small: true;
+                                primary: true;
+                                text: "Install " + State.upd-available + " and restart";
+                                enabled: !State.upd-busy;
+                                clicked => { State.install-update(); }
+                            }
+                        }
+                        if State.upd-status != "": Muted { text: State.upd-status; wrap: word-wrap; }
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 12px;
+                max-width: 640px;
                 H2 { text: "Downloads"; }
                 Card {
                     VerticalLayout {

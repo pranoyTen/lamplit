@@ -4,7 +4,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v1.*'] # 2.x tags build the native app (release-native.yml)
 
 jobs:
   release:

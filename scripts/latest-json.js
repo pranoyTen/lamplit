@@ -2,14 +2,19 @@
 // (the app downloads it with a token). Run in CI: node scripts/latest-json.js v1.2.0 > latest.json
 const { execFileSync } = require('node:child_process');
 
+// `format` tells the native app's updater (cargo-packager-updater) how to install the file; the Tauri updater ignores it.
 function latestJson({ tag, notes, repo, assets, sigs }) {
-  const find = suffix => {
+  const find = (suffix, format) => {
     const a = assets.find(x => x.name.endsWith(suffix));
     if (!a || !sigs[a.name]) throw new Error(`release ${tag} has no signed ${suffix} file`);
-    return { signature: sigs[a.name].trim(), url: `https://api.github.com/repos/${repo}/releases/assets/${a.id}` };
+    return { signature: sigs[a.name].trim(), url: `https://api.github.com/repos/${repo}/releases/assets/${a.id}`, format };
   };
-  const win = find('-setup.exe'), mac = find('.app.tar.gz'); // the Mac build is universal, so both chips get the same file
-  return { version: tag.replace(/^v/, ''), notes: notes ?? '', pub_date: new Date().toISOString(), platforms: { 'windows-x86_64': win, 'darwin-aarch64': mac, 'darwin-x86_64': mac } };
+  const win = find('-setup.exe', 'nsis');
+  // the native app builds each Mac chip on its own runner (Lectern_aarch64 / Lectern_x64); the Tauri app built one universal file
+  const perChip = assets.some(x => x.name.endsWith('_aarch64.app.tar.gz'));
+  const arm = find(perChip ? '_aarch64.app.tar.gz' : '.app.tar.gz', 'app');
+  const intel = perChip ? find('_x64.app.tar.gz', 'app') : arm;
+  return { version: tag.replace(/^v/, ''), notes: notes ?? '', pub_date: new Date().toISOString(), platforms: { 'windows-x86_64': win, 'darwin-aarch64': arm, 'darwin-x86_64': intel } };
 }
 
 if (require.main === module) {

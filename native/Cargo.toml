@@ -1,9 +1,28 @@
 [package]
 name = "lectern-native"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2024"
+description = "Audiobookshelf player"
+
+# lectern.exe, like the Tauri app, so an installed 1.x is updated in place
+[[bin]]
+name = "lectern"
+path = "src/main.rs"
+
+# installers built by cargo-packager (in the release workflow): NSIS on Windows, an app bundle and a dmg on a Mac. The product name
+# and identifier match the Tauri app's, so they install over it.
+[package.metadata.packager]
+product-name = "Lectern"
+identifier = "app.lectern.desktop"
+publisher = "Lectern"
+before-packaging-command = "cargo build --release"
+binaries-dir = "target/release"
+out-dir = "dist"
+binaries = [{ path = "lectern", main = true }]
+icons = ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
 
 [dependencies]
+cargo-packager-updater = "0.2.3"
 chrono = "0.4.45"
 dirs = "7.0.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
