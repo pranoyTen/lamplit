@@ -1,8 +1,8 @@
 // Home, Library, one book, and Settings.
-import { ScrollView, LineEdit, ComboBox } from "std-widgets.slint";
+import { ScrollView, LineEdit, ComboBox, Switch } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons, Icon, Clickable, Btn, Link, Bar, Card, Cover, H1, H2, Muted } from "widgets.slint";
-import { State, BookCard } from "state.slint";
+import { State, BookCard, DlRow } from "state.slint";
 
 // a cover that plays the book, its title and author that open it, and a progress bar once started
 component BookTile {
@@ -182,7 +182,7 @@ export component LibraryPage {
             HorizontalLayout {
                 spacing: 8px;
                 alignment: start;
-                for f[i] in ["All", "In progress", "Not started", "Finished"]: Pill {
+                for f[i] in ["All", "In progress", "Not started", "Finished", "Downloaded"]: Pill {
                     text: f;
                     on: State.filter == i;
                     clicked => {
@@ -249,6 +249,17 @@ export component BookScreen {
                             text: State.now-id == State.book.id ? (State.playing ? "Pause" : "Resume") : "Play";
                             clicked => { State.play-book(State.book.id); }
                         }
+                        if State.book-dl == "": Btn { text: "Download"; clicked => { State.download(State.book.id); } }
+                        if State.book-dl == "queued" || State.book-dl == "active" || State.book-dl == "error": Muted {
+                            text: State.book-dl-text;
+                            vertical-alignment: center;
+                            color: State.book-dl == "error" ? Theme.danger : Theme.muted;
+                        }
+                        if State.book-dl == "error": Btn { text: "Retry"; clicked => { State.retry-download(State.book.id); } }
+                        if State.book-dl != "": Btn {
+                            text: State.book-dl == "done" ? "Remove download" : "Cancel download";
+                            clicked => { State.remove-download(State.book.id); }
+                        }
                         Btn {
                             text: State.book.finished ? "Mark as not finished" : "Mark as finished";
                             clicked => { State.set-finished(State.book.id, !State.book.finished); }
@@ -287,6 +298,7 @@ export component SettingsPage {
                 max-width: 640px;
                 H2 { text: "Server connection"; }
                 Card {
+                    VerticalLayout { // a card holding only conditional rows gets no height without a layout
                     if State.signed-in: HorizontalLayout {
                         padding: 24px;
                         spacing: 16px;
@@ -321,6 +333,7 @@ export component SettingsPage {
                             }
                         }
                     }
+                    }
                 }
             }
             VerticalLayout {
@@ -334,6 +347,118 @@ export component SettingsPage {
                         Text { text: "Theme"; color: Theme.ink; vertical-alignment: center; horizontal-stretch: 1; }
                         Btn { small: true; icon: Icons.theme; text: Theme.dark ? "Dark" : "Light"; clicked => { State.toggle-theme(); } }
                     }
+                }
+            }
+            VerticalLayout {
+                spacing: 12px;
+                max-width: 640px;
+                H2 { text: "Downloads"; }
+                Card {
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 20px;
+                        HorizontalLayout {
+                            spacing: 16px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                Text { text: "Offline storage limit"; color: Theme.ink; }
+                                Muted { text: "Books that would go over it are not downloaded"; font-size: 12px; wrap: word-wrap; }
+                            }
+                            ComboBox {
+                                width: 140px;
+                                model: ["No limit", "5 GB", "10 GB", "20 GB", "50 GB"];
+                                current-index <=> State.dl-limit-index;
+                                selected => { State.set-limit(State.dl-limit-index); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 16px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                Text { text: "Download location"; color: Theme.ink; }
+                                Muted { text: State.dl-folder + " · applies to new downloads"; font-size: 12px; wrap: word-wrap; }
+                            }
+                            Btn { small: true; text: "Change"; y: (parent.height - self.height) / 2; clicked => { State.choose-folder(); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 16px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                Text { text: "Remove downloads when a book is finished"; color: Theme.ink; wrap: word-wrap; }
+                                Muted { text: "Frees space automatically. Finished books stay in your library"; font-size: 12px; wrap: word-wrap; }
+                            }
+                            Switch {
+                                checked <=> State.auto-remove;
+                                toggled => { State.set-auto-remove(self.checked); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// one downloaded or downloading book: its cover, progress and what can be done with it
+component DownloadRow {
+    in property <DlRow> item;
+    HorizontalLayout {
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 16px;
+        Clickable {
+            label: root.item.title;
+            width: 56px;
+            height: 56px;
+            radius: 4px;
+            clicked => { State.open-book(root.item.id); }
+            Cover { width: 100%; height: 100%; img: root.item.cover; title: ""; tint: root.item.tint; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            horizontal-stretch: 1;
+            min-width: 0;
+            Text { text: root.item.title; font-weight: 500; color: Theme.ink; overflow: elide; }
+            Muted { text: root.item.author; font-size: 12px; }
+            if !root.item.done && !root.item.failed: Bar { value: root.item.progress; }
+            Muted { text: root.item.status; font-size: 12px; color: root.item.failed ? Theme.danger : Theme.muted; wrap: word-wrap; }
+        }
+        if root.item.failed: Btn { small: true; text: "Retry"; y: (parent.height - self.height) / 2; clicked => { State.retry-download(root.item.id); } }
+        Btn {
+            small: true;
+            text: root.item.done ? "Remove" : "Cancel";
+            y: (parent.height - self.height) / 2;
+            clicked => { State.remove-download(root.item.id); }
+        }
+    }
+}
+
+export component DownloadsPage {
+    sv := ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: 32px;
+            spacing: 24px;
+            alignment: start;
+            VerticalLayout {
+                H1 { text: "Downloads"; }
+                Muted { text: State.dl-summary; }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                Btn { small: true; text: State.dl-paused ? "Resume downloads" : "Pause downloads"; clicked => { State.pause-downloads(!State.dl-paused); } }
+                if State.dl-any-done: Btn { small: true; text: "Remove all downloaded"; clicked => { State.remove-finished(); } }
+            }
+            if State.downloads.length == 0: Muted { text: "No downloads yet. Use Download on a book's page to listen without a connection"; wrap: word-wrap; }
+            VerticalLayout {
+                max-width: 840px;
+                for d[i] in State.downloads: VerticalLayout {
+                    DownloadRow { item: d; }
+                    Rectangle { height: 1px; background: Theme.hairline; }
                 }
             }
         }

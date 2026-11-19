@@ -4,6 +4,7 @@
 mod api;
 mod book;
 mod covers;
+mod downloads;
 mod http_source;
 mod library;
 mod media;
@@ -13,12 +14,13 @@ mod stretch;
 use api::{Book, Client, Details};
 use book::{Bookmark, Chapter, Sleep};
 use covers::Covers;
+use downloads::Downloads;
 use library::{Filter, Sort};
 use player::Engine;
 use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use souvlaki::{MediaControlEvent, SeekDirection};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::{Duration, Instant};
@@ -27,8 +29,9 @@ slint::include_modules!();
 
 struct Playing {
     engine: Engine,
-    session: String,
+    session: Option<String>, // None when the server can't be reached: the place is then remembered on this computer only
     id: String,
+    ended: bool,
     title: String,
     duration: f64,
     listened: f64, // seconds heard since the last report to the server
@@ -55,7 +58,29 @@ struct App {
     speed: f64,
     media: Option<souvlaki::MediaControls>,
     shown: (Option<bool>, Instant), // the play state last published to the OS overlay and the tray, and when
+    dl: Downloads,
+    downloaded: HashSet<String>, // finished downloads, for the Library's Downloaded filter
+    prefs: Prefs,
+    places: HashMap<String, f64>, // where each book was left, kept here for listening offline
 }
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct Prefs {
+    dark: bool,
+    speed: f64,
+    folder: Option<std::path::PathBuf>, // where new downloads go; None is the app's own data folder
+    limit_gb: u64,                      // 0 = no limit
+    auto_remove: bool,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Prefs { dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false }
+    }
+}
+
+const LIMITS_GB: [u64; 5] = [0, 5, 10, 20, 50];
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -116,18 +141,31 @@ fn load_session() -> Option<Client> {
     Client::new(v["server"].as_str()?, v["token"].as_str()?).ok()
 }
 
-fn save_prefs(dark: bool, speed: f64) {
+fn save_json(name: &str, v: &impl serde::Serialize) {
     if let Some(d) = config_dir() {
-        let _ = std::fs::create_dir_all(&d).and_then(|_| std::fs::write(d.join("prefs.json"), serde_json::json!({ "dark": dark, "speed": speed }).to_string()));
+        let _ = std::fs::create_dir_all(&d).and_then(|_| std::fs::write(d.join(name), serde_json::to_string(v).unwrap_or_default()));
     }
 }
 
-fn load_prefs() -> (bool, f64) {
-    let v: serde_json::Value = config_dir()
-        .and_then(|d| std::fs::read_to_string(d.join("prefs.json")).ok())
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    (v["dark"].as_bool().unwrap_or(false), v["speed"].as_f64().unwrap_or(1.0))
+fn load_json<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
+    serde_json::from_str(&std::fs::read_to_string(config_dir()?.join(name)).ok()?).ok()
+}
+
+fn save_prefs() {
+    save_json("prefs.json", &with_app(|a| a.prefs.clone()));
+}
+
+/// Where downloads go when no folder has been chosen.
+fn default_folder() -> std::path::PathBuf {
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("lectern-native").join("downloads")
+}
+
+/// The library as last loaded, so Home, the Library and downloaded books still work without a connection.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Offline {
+    books: Vec<Book>,
+    in_progress: Vec<Book>,
+    progress: HashMap<String, f64>,
 }
 
 /// The tray icon as RGBA pixels, decoded from the PNG built into the exe.
@@ -221,12 +259,12 @@ fn covers_needed(list: &str, first: i32, last: i32) {
 fn refresh_library() {
     let Some(ui) = window() else { return };
     let st = ui.global::<State>();
-    let filter = [Filter::All, Filter::InProgress, Filter::NotStarted, Filter::Finished][st.get_filter().clamp(0, 3) as usize];
+    let filter = [Filter::All, Filter::InProgress, Filter::NotStarted, Filter::Finished, Filter::Downloaded][st.get_filter().clamp(0, 4) as usize];
     let sort = [Sort::Title, Sort::Author, Sort::Added, Sort::Longest][st.get_sort().clamp(0, 3) as usize];
     let query = st.get_query().to_string();
     let count = with_app(|a| {
         a.covers.drop_queued();
-        let shown: Vec<Book> = library::visible(&a.books, &a.progress, &query, filter, sort).into_iter().cloned().collect();
+        let shown: Vec<Book> = library::visible(&a.books, &a.progress, &a.downloaded, &query, filter, sort).into_iter().cloned().collect();
         let rows: Vec<BookCard> = shown.iter().map(|b| card(a, b)).collect();
         a.library.set_vec(rows);
         (shown.len(), a.books.len())
@@ -269,37 +307,115 @@ fn load_library(client: Client) {
     st.set_busy(true);
     background(
         move || {
-            let books = client.books()?;
-            let progress = client.progress().unwrap_or_default();
-            let in_progress = client.in_progress().unwrap_or_default();
-            Ok::<_, String>((client, books, progress, in_progress))
+            let r = client.books().map(|books| {
+                let progress = client.progress().unwrap_or_default();
+                let in_progress = client.in_progress().unwrap_or_default();
+                Offline { books, in_progress, progress }
+            });
+            (client, r)
         },
-        |r| {
+        |(client, r)| {
             let Some(ui) = window() else { return };
             let st = ui.global::<State>();
             st.set_busy(false);
-            match r {
-                Ok((client, books, progress, in_progress)) => {
-                    st.set_message(SharedString::new());
-                    st.set_signed_in(true);
-                    st.set_signed_in_as(format!("Signed in to {}", client.base).into());
-                    save_session(Some(&client));
-                    with_app(|a| (a.client, a.books, a.progress, a.in_progress) = (Some(client), books, progress, in_progress));
-                    refresh_home();
-                    refresh_library();
-                    if st.get_route() == "settings" {
-                        st.set_route("home".into());
-                    }
+            let saved = load_json::<Offline>("library.json").filter(|o| !o.books.is_empty());
+            let (lib, offline) = match (r, saved) {
+                (Ok(lib), _) => {
+                    save_json("library.json", &lib);
+                    (lib, false)
                 }
-                Err(e) => {
+                // no connection, but the library was loaded before: show it, and play what is downloaded
+                (Err(e), Some(saved)) if !e.starts_with("Wrong username") => (saved, true),
+                (Err(e), _) => {
                     st.set_message(e.into());
                     if !st.get_signed_in() {
                         st.set_route("settings".into());
                     }
+                    return;
                 }
+            };
+            st.set_offline(offline);
+            st.set_message(SharedString::new());
+            st.set_signed_in(true);
+            st.set_signed_in_as(format!("Signed in to {}", client.base).into());
+            save_session(Some(&client));
+            with_app(|a| {
+                a.dl.set_client((!offline).then(|| client.clone())); // downloads wait for a connection
+                (a.client, a.books, a.progress, a.in_progress) = (Some(client), lib.books, lib.progress, lib.in_progress);
+            });
+            refresh_home();
+            refresh_library();
+            if st.get_route() == "settings" {
+                st.set_route("home".into());
             }
         },
     );
+}
+
+// ---- downloads ----
+fn refresh_downloads() {
+    let Some(ui) = window() else { return };
+    let st = ui.global::<State>();
+    let (items, bytes, limit, paused, folder) = with_app(|a| (a.dl.list(), a.dl.bytes(), a.dl.limit(), a.dl.paused(), a.dl.folder()));
+    let gb = |b: u64| format!("{:.1} GB", b as f64 / 1e9);
+    let rows: Vec<DlRow> = items.iter()
+        .map(|i| {
+            let status = match i.status {
+                downloads::Status::Done => "Downloaded".to_string(),
+                downloads::Status::Active => format!("Downloading {}%", (i.fraction() * 100.0) as u32),
+                downloads::Status::Queued => if paused { "Paused".into() } else if st.get_offline() { "Waiting for a connection".into() } else { "Queued".into() },
+                downloads::Status::Error => i.error.clone(),
+            };
+            DlRow {
+                id: i.id.clone().into(), title: i.title.clone().into(), author: i.author.clone().into(), status: status.into(),
+                progress: i.fraction(), done: i.status == downloads::Status::Done, failed: i.status == downloads::Status::Error,
+                cover: with_app(|a| a.covers.get(&i.id)).unwrap_or_default(), tint: tint(&i.title),
+            }
+        })
+        .collect();
+    for r in &rows {
+        want_cover(&r.id);
+    }
+    let book = st.get_book().id.to_string();
+    match items.iter().find(|i| i.id == book) {
+        None => st.set_book_dl(SharedString::new()),
+        Some(i) => {
+            let row = rows.iter().find(|r| r.id == book).unwrap();
+            st.set_book_dl(match i.status {
+                downloads::Status::Done => "done",
+                downloads::Status::Active => "active",
+                downloads::Status::Queued => "queued",
+                downloads::Status::Error => "error",
+            }.into());
+            st.set_book_dl_text(row.status.clone());
+        }
+    }
+    let done = items.iter().filter(|i| i.status == downloads::Status::Done).count();
+    st.set_dl_any_done(done > 0);
+    st.set_dl_paused(paused);
+    st.set_dl_summary(format!("{} {} · {} on disk{}", items.len(), if items.len() == 1 { "book" } else { "books" }, gb(bytes),
+        if limit > 0 { format!(" of {}", gb(limit)) } else { String::new() }).into());
+    st.set_dl_folder(folder.to_string_lossy().to_string().into());
+    st.set_downloads(ModelRc::new(VecModel::from(rows)));
+    // the Library's Downloaded filter follows finished downloads
+    let now: HashSet<String> = items.iter().filter(|i| i.status == downloads::Status::Done).map(|i| i.id.clone()).collect();
+    if with_app(|a| std::mem::replace(&mut a.downloaded, now.clone()) != now) && st.get_filter() == 4 {
+        refresh_library();
+    }
+}
+
+fn choose_folder() {
+    std::thread::spawn(|| {
+        let Some(dir) = rfd::FileDialog::new().set_title("Where should downloads go?").pick_folder() else { return };
+        let _ = slint::invoke_from_event_loop(move || {
+            with_app(|a| {
+                a.dl.set_folder(dir.clone());
+                a.prefs.folder = Some(dir);
+            });
+            save_prefs();
+            refresh_downloads();
+        });
+    });
 }
 
 fn open_book(id: String) {
@@ -319,6 +435,7 @@ fn open_book(id: String) {
         match r {
             Ok(d) => {
                 st.set_book(book_page(&id, &d));
+                refresh_downloads(); // its Download button
                 want_cover(&id);
             }
             Err(e) => st.set_message(e.into()),
@@ -433,18 +550,23 @@ fn set_speed(s: f64) {
             p.engine.set_speed(s);
         }
     });
+    with_app(|a| a.prefs.speed = s);
+    save_prefs();
     if let Some(ui) = window() {
         ui.global::<State>().set_speed(s as f32);
-        save_prefs(ui.global::<Theme>().get_dark(), s);
     }
 }
 
-/// Tells the server where the listener is, in the background; `close` ends the session. Returns the thread so the caller can wait on exit.
+/// Remembers the place on this computer, and tells the server in the background when there is a session; `close` ends it.
+/// Returns the thread so the caller can wait on exit.
 fn report(close: bool) -> Option<std::thread::JoinHandle<()>> {
     with_app(|a| {
-        let (c, p) = (a.client.clone()?, a.playing.as_mut()?);
-        let (session, pos, listened) = (p.session.clone(), p.engine.status.pos(), p.listened);
+        let p = a.playing.as_mut()?;
+        let (pos, listened) = (p.engine.status.pos(), p.listened);
         p.listened = 0.0;
+        a.places.insert(p.id.clone(), pos);
+        save_json("places.json", &a.places);
+        let (c, session) = (a.client.clone()?, p.session.clone()?);
         Some(std::thread::spawn(move || {
             if let Err(e) = c.sync(&session, pos, listened, close) {
                 eprintln!("progress sync failed: {e}");
@@ -469,14 +591,32 @@ fn play_book(id: String) {
     if st.get_has_book() && st.get_now_id() == id {
         return toggle();
     }
-    let Some((client, book)) = with_app(|a| Some((a.client.clone()?, find_book(a, &id)?))) else { return };
+    let Some((client, book, local, place)) = with_app(|a| Some((a.client.clone()?, find_book(a, &id)?, a.dl.local(&id), a.places.get(&id).copied()))) else { return };
     stop_book();
     st.set_message(format!("Opening {}…", book.title).into());
     background(
         {
             let id = book.id.clone();
-            // a book still plays when its bookmarks can't be read
-            move || client.play(&id).map(|s| { let b = client.bookmarks(&id).unwrap_or_default(); (client, s, b) })
+            // A downloaded book plays from disk. It still opens a server session when it can, so the place and listening time are the
+            // server's; without a connection it starts where this computer last left it. A book still plays when its bookmarks can't be read.
+            move || {
+                let online = client.play(&id);
+                let s = match (online, local) {
+                    (Ok(mut s), Some((tracks, duration, chapters))) => {
+                        (s.tracks, s.duration, s.chapters) = (tracks, duration, chapters);
+                        Ok(s)
+                    }
+                    (Ok(s), None) => Ok(s),
+                    (Err(_), Some((tracks, duration, chapters))) => {
+                        Ok(api::Session { id: String::new(), start: place.unwrap_or(0.0), duration, tracks, chapters })
+                    }
+                    (Err(e), None) => Err(e),
+                };
+                s.map(|s| {
+                    let b = if s.id.is_empty() { vec![] } else { client.bookmarks(&id).unwrap_or_default() };
+                    (client, s, b)
+                })
+            }
         },
         move |r| {
             let Some(ui) = window() else { return };
@@ -513,7 +653,8 @@ fn play_book(id: String) {
                 }
                 a.shown.0 = None;
                 a.playing = Some(Playing {
-                    engine, session: s.id, id: book.id, title: book.title, duration: s.duration, listened: 0.0, last_tick: Instant::now(),
+                    engine, session: (!s.id.is_empty()).then_some(s.id), id: book.id, ended: false, title: book.title, duration: s.duration,
+                    listened: 0.0, last_tick: Instant::now(),
                     chapters: s.chapters, bookmarks, shown_chapter: None, sleep: Sleep::Off,
                 });
             });
@@ -584,7 +725,14 @@ fn tick(st: &State, tray: &Tray) {
         st.set_playing(playing && !slept);
         match state {
             player::FAILED => st.set_message(p.engine.status.error.lock().unwrap().clone().into()),
-            player::ENDED => st.set_message(format!("Finished {}", p.title).into()),
+            player::ENDED if !p.ended => {
+                p.ended = true;
+                st.set_message(format!("Finished {}", p.title).into());
+                // finished books free their space, when the listener asked for that
+                if a.prefs.auto_remove && a.dl.get(&p.id).is_some() {
+                    a.dl.remove(&p.id);
+                }
+            }
             _ => {}
         }
         p.listened >= 15.0 || slept
@@ -651,23 +799,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()?;
     sink.log_on_drop(false);
     let out = rodio::Player::connect_new(sink.mixer());
-    let (dark, speed) = load_prefs();
+    let prefs: Prefs = load_json("prefs.json").unwrap_or_default();
 
     let ui = AppWindow::new()?;
     let covers = Covers::new(Box::new(|id, px| {
         let _ = slint::invoke_from_event_loop(move || cover_arrived(id, px));
     }));
+    let dl = Downloads::new(
+        config_dir().unwrap_or_default().join("downloads.json"),
+        prefs.folder.clone().unwrap_or_else(default_folder),
+        prefs.limit_gb * 1_000_000_000,
+        8 * 1024 * 1024,
+        || {
+            let _ = slint::invoke_from_event_loop(refresh_downloads);
+        },
+    );
     let (library, continuing, recent) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
     APP.with(|a| {
         *a.borrow_mut() = Some(App {
             ui: ui.as_weak(), _sink: sink, out, client: None, books: vec![], in_progress: vec![], progress: HashMap::new(),
-            library: library.clone(), continuing: continuing.clone(), recent: recent.clone(), covers, playing: None, speed,
-            media: None, shown: (None, Instant::now()),
+            library: library.clone(), continuing: continuing.clone(), recent: recent.clone(), covers, playing: None, speed: prefs.speed,
+            media: None, shown: (None, Instant::now()), dl, downloaded: HashSet::new(), prefs: prefs.clone(),
+            places: load_json("places.json").unwrap_or_default(),
         })
     });
 
     let theme = ui.global::<Theme>();
-    theme.set_dark(dark);
+    theme.set_dark(prefs.dark);
     if !cfg!(windows) {
         theme.set_sans("".into()); // the system font
     }
@@ -675,7 +833,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.set_library(library.into());
     st.set_continue_books(continuing.into());
     st.set_recent_books(recent.into());
-    st.set_speed(speed as f32);
+    st.set_speed(prefs.speed as f32);
+    st.set_dl_limit_index(LIMITS_GB.iter().position(|g| *g == prefs.limit_gb).unwrap_or(2) as i32);
+    st.set_auto_remove(prefs.auto_remove);
+    refresh_downloads();
+
+    st.on_download(|id| {
+        with_app(|a| if let Some(b) = find_book(a, &id) { a.dl.add(&b.id, &b.title, &b.author) });
+    });
+    st.on_remove_download(|id| with_app(|a| a.dl.remove(&id)));
+    st.on_retry_download(|id| with_app(|a| a.dl.retry(&id)));
+    st.on_pause_downloads(|on| with_app(|a| a.dl.pause(on)));
+    st.on_remove_finished(|| with_app(|a| a.dl.remove_finished()));
+    st.on_choose_folder(choose_folder);
+    st.on_set_limit(|i| {
+        let gb = LIMITS_GB[i.clamp(0, 4) as usize];
+        with_app(|a| {
+            a.prefs.limit_gb = gb;
+            a.dl.set_limit(gb * 1_000_000_000);
+        });
+        save_prefs();
+    });
+    st.on_set_auto_remove(|on| {
+        with_app(|a| a.prefs.auto_remove = on);
+        save_prefs();
+    });
 
     st.on_sign_in(|server, user, pass| {
         say("Signing in…");
@@ -696,7 +878,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.on_sign_out(|| {
         stop_book();
         save_session(None);
+        save_json("library.json", &Offline::default());
         with_app(|a| {
+            a.dl.set_client(None);
             (a.client, a.books, a.in_progress) = (None, vec![], vec![]);
             a.progress.clear();
             for m in [&a.library, &a.continuing, &a.recent] {
@@ -715,7 +899,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ui) = window() {
             let t = ui.global::<Theme>();
             t.set_dark(!t.get_dark());
-            save_prefs(t.get_dark(), with_app(|a| a.speed));
+            with_app(|a| a.prefs.dark = t.get_dark());
+            save_prefs();
         }
     });
     st.on_refresh_library(refresh_library);

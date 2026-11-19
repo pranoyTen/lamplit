@@ -1,4 +1,4 @@
-// The playback engine. A decode thread opens the book's audio files one after another (streamed with HttpSource), stretches them to the
+// The playback engine. A decode thread opens the book's audio files one after another (streamed with HttpSource, or read from a download), stretches them to the
 // chosen speed and queues about two seconds of samples. The audio thread only reads from that queue (Out), so network stalls never reach
 // it; when the queue runs dry it plays silence. Seeking and speed changes bump a generation number so already-queued audio is dropped.
 use crate::api::Track;
@@ -85,12 +85,28 @@ impl Drop for Engine {
     }
 }
 
-fn open(http: &reqwest::blocking::Client, token: &str, t: &Track) -> Result<Decoder<HttpSource>, String> {
-    let src = HttpSource::open(http.clone(), token.into(), t.url.clone()).map_err(|e| format!("Can't open the audio: {e}"))?;
-    let (len, mime) = (src.len, src.mime.clone());
+/// Audio bytes the decoder can read and seek in: a stream from the server or a downloaded file.
+pub trait Media: std::io::Read + std::io::Seek + Send + Sync {}
+impl<T: std::io::Read + std::io::Seek + Send + Sync> Media for T {}
+type Dec = Decoder<Box<dyn Media>>;
+
+fn open(http: &reqwest::blocking::Client, token: &str, t: &Track) -> Result<Dec, String> {
+    let (src, len, mime, ext): (Box<dyn Media>, u64, Option<String>, Option<String>) = if t.url.starts_with("http://") || t.url.starts_with("https://") {
+        let s = HttpSource::open(http.clone(), token.into(), t.url.clone()).map_err(|e| format!("Can't open the audio: {e}"))?;
+        let (len, mime) = (s.len, s.mime.clone());
+        (Box::new(s), len, mime, None)
+    } else {
+        let f = std::fs::File::open(&t.url).map_err(|e| format!("Can't open the downloaded file: {e}"))?;
+        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+        let ext = std::path::Path::new(&t.url).extension().map(|e| e.to_string_lossy().to_string());
+        (Box::new(f), len, None, ext)
+    };
     let mut b = Decoder::builder().with_data(src).with_byte_len(len).with_coarse_seek(true);
     if let Some(m) = &mime {
         b = b.with_mime_type(m);
+    }
+    if let Some(e) = &ext {
+        b = b.with_hint(e);
     }
     b.build().map_err(|e| format!("Can't decode this file: {e}"))
 }
@@ -136,7 +152,7 @@ fn decode(http: reqwest::blocking::Client, token: String, tracks: Vec<Track>, at
     let mut pending: Option<Chunk> = None;
     let mut epoch = 0u64;
 
-    let restart = |t: f64, speed: f64, ti: &mut usize, dec: &mut Decoder<HttpSource>, stretch: &mut Stretch, epoch: &mut u64| -> Result<(), String> {
+    let restart = |t: f64, speed: f64, ti: &mut usize, dec: &mut Dec, stretch: &mut Stretch, epoch: &mut u64| -> Result<(), String> {
         *epoch += 1;
         st.epoch.store(*epoch, Relaxed);
         st.set_pos(t);

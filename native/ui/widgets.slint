@@ -18,6 +18,7 @@ export global Icons {
     out property <string> down: "m6 9 6 6 6-6";
     out property <string> left: "M15 6l-6 6 6 6";
     out property <string> close: "M6 6l12 12M18 6 6 18";
+    out property <string> downloads: "M12 3v12m0 0-4-4m4 4 4-4M4 20h16";
 }
 
 export component Icon {
@@ -106,6 +107,7 @@ export component Btn inherits Clickable {
     label: text;
     height: small ? 36px : 44px;
     min-width: row.preferred-width;
+    max-width: row.preferred-width; // a button keeps its natural width in a row
     opacity: self.enabled ? 1 : 0.45;
     Rectangle {
         border-radius: 8px;

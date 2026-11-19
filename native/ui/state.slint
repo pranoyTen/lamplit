@@ -30,6 +30,18 @@ export struct BookPage {
     facts: [Fact],
 }
 
+export struct DlRow {
+    id: string,
+    title: string,
+    author: string,
+    status: string,
+    progress: float,
+    done: bool,
+    failed: bool,
+    cover: image,
+    tint: color,
+}
+
 export struct ListRow {
     title: string,
     sub: string,
@@ -57,7 +69,7 @@ export global State {
     in property <string> library-count;
     in-out property <string> query;
     in-out property <int> sort; // 0 title, 1 author, 2 recently added, 3 longest
-    in-out property <int> filter; // 0 all, 1 in progress, 2 not started, 3 finished
+    in-out property <int> filter; // 0 all, 1 in progress, 2 not started, 3 finished, 4 downloaded
 
     // one book
     in property <BookPage> book;
@@ -107,4 +119,24 @@ export global State {
     callback add-bookmark();
     callback remove-bookmark(int);
     callback sleep(int);
+
+    // downloads
+    in property <[DlRow]> downloads;
+    in property <string> dl-summary;
+    in property <bool> dl-paused;
+    in property <bool> dl-any-done;
+    in property <string> book-dl; // the open book's download: "", "queued", "active", "done" or "error"
+    in property <string> book-dl-text;
+    in property <string> dl-folder;
+    in-out property <int> dl-limit-index; // 0 no limit, then 5, 10, 20 and 50 GB
+    in-out property <bool> auto-remove;
+    in property <bool> offline;
+    callback download(string);
+    callback remove-download(string);
+    callback retry-download(string);
+    callback pause-downloads(bool);
+    callback remove-finished();
+    callback choose-folder();
+    callback set-limit(int);
+    callback set-auto-remove(bool);
 }

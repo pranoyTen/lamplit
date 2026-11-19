@@ -1,6 +1,6 @@
 // The library's rules, kept apart from the UI so they can be tested: which books show, in what order, and how they are labelled.
 use crate::api::Book;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// "12h 4m" or "38m", like the Tauri app.
 pub fn length(secs: f64) -> String {
@@ -37,6 +37,7 @@ pub enum Filter {
     InProgress,
     NotStarted,
     Finished,
+    Downloaded,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -48,7 +49,7 @@ pub enum Sort {
 }
 
 /// The books the Library shows: those matching the filter and the search text, in the chosen order.
-pub fn visible<'a>(books: &'a [Book], progress: &HashMap<String, f64>, query: &str, filter: Filter, sort: Sort) -> Vec<&'a Book> {
+pub fn visible<'a>(books: &'a [Book], progress: &HashMap<String, f64>, downloaded: &HashSet<String>, query: &str, filter: Filter, sort: Sort) -> Vec<&'a Book> {
     let q = query.trim().to_lowercase();
     let p = |b: &Book| progress.get(&b.id).copied().unwrap_or(0.0);
     let mut out: Vec<&Book> = books.iter()
@@ -57,6 +58,7 @@ pub fn visible<'a>(books: &'a [Book], progress: &HashMap<String, f64>, query: &s
             Filter::InProgress => p(b) > 0.0 && p(b) < 1.0,
             Filter::NotStarted => p(b) == 0.0,
             Filter::Finished => p(b) >= 1.0,
+            Filter::Downloaded => downloaded.contains(&b.id),
         })
         .filter(|b| q.is_empty() || format!("{} {}", b.title, b.author).to_lowercase().contains(&q))
         .collect();
@@ -95,14 +97,16 @@ mod tests {
     fn filters_searches_and_sorts() {
         let books = [b("1", "Dune", "Herbert", 75000.0, 3.0), b("2", "Anathem", "Stephenson", 120000.0, 1.0), b("3", "Emma", "Austen", 50000.0, 2.0)];
         let progress = HashMap::from([("1".to_string(), 0.4), ("3".to_string(), 1.0)]);
+        let dl = HashSet::from(["2".to_string()]);
         let ids = |v: Vec<&Book>| v.iter().map(|b| b.id.as_str()).collect::<Vec<_>>().join(",");
-        assert_eq!(ids(visible(&books, &progress, "", Filter::All, Sort::Title)), "2,1,3");
-        assert_eq!(ids(visible(&books, &progress, "", Filter::All, Sort::Author)), "3,1,2");
-        assert_eq!(ids(visible(&books, &progress, "", Filter::All, Sort::Added)), "1,3,2");
-        assert_eq!(ids(visible(&books, &progress, "", Filter::All, Sort::Longest)), "2,1,3");
-        assert_eq!(ids(visible(&books, &progress, "", Filter::InProgress, Sort::Title)), "1");
-        assert_eq!(ids(visible(&books, &progress, "", Filter::NotStarted, Sort::Title)), "2");
-        assert_eq!(ids(visible(&books, &progress, "", Filter::Finished, Sort::Title)), "3");
-        assert_eq!(ids(visible(&books, &progress, "  HERB ", Filter::All, Sort::Title)), "1");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::All, Sort::Title)), "2,1,3");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::All, Sort::Author)), "3,1,2");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::All, Sort::Added)), "1,3,2");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::All, Sort::Longest)), "2,1,3");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::InProgress, Sort::Title)), "1");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::NotStarted, Sort::Title)), "2");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::Finished, Sort::Title)), "3");
+        assert_eq!(ids(visible(&books, &progress, &dl, "  HERB ", Filter::All, Sort::Title)), "1");
+        assert_eq!(ids(visible(&books, &progress, &dl, "", Filter::Downloaded, Sort::Title)), "2");
     }
 }

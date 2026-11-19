@@ -9,7 +9,7 @@ pub struct Client {
     http: reqwest::blocking::Client,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Book {
     pub id: String,
     pub title: String,
@@ -70,10 +70,31 @@ pub fn plain_text(html: &str) -> String {
     out.trim().to_string()
 }
 
+/// One audio file to play: `url` is a web address to stream, or a path to a downloaded file.
 #[derive(Clone, Debug)]
 pub struct Track {
     pub url: String,
     pub start: f64,
+}
+
+/// One audio file on the server, as the download manager needs it.
+#[derive(Clone, Debug)]
+pub struct RemoteFile {
+    pub path: String, // the server path, without the address
+    pub ext: String,
+    pub size: u64,
+    pub start: f64,
+}
+
+fn chapters_of(v: &Value, duration: f64) -> Vec<Chapter> {
+    let list = v.as_array().cloned().unwrap_or_default();
+    list.iter().enumerate()
+        .map(|(i, c)| {
+            let start = c["start"].as_f64().unwrap_or(0.0);
+            let end = c["end"].as_f64().or_else(|| list.get(i + 1).and_then(|n| n["start"].as_f64())).unwrap_or(duration);
+            Chapter { start, end: end.max(start + 1.0), title: s(&c["title"]) }
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -202,15 +223,41 @@ impl Client {
             return Err("This book has no audio".into());
         }
         let duration = v["duration"].as_f64().unwrap_or(0.0);
-        let list = v["chapters"].as_array().cloned().unwrap_or_default();
-        let chapters = list.iter().enumerate()
-            .map(|(i, c)| {
-                let start = c["start"].as_f64().unwrap_or(0.0);
-                let end = c["end"].as_f64().or_else(|| list.get(i + 1).and_then(|n| n["start"].as_f64())).unwrap_or(duration);
-                Chapter { start, end: end.max(start + 1.0), title: s(&c["title"]) }
+        Ok(Session { id: s(&v["id"]), start: v["currentTime"].as_f64().unwrap_or(0.0), duration, tracks, chapters: chapters_of(&v["chapters"], duration) })
+    }
+
+    /// The audio files of a book to download, in play order, with its length and chapters.
+    pub fn files(&self, id: &str) -> Result<(Vec<RemoteFile>, f64, Vec<Chapter>), String> {
+        let m = self.call(reqwest::Method::GET, &format!("/api/items/{id}?expanded=1"), None)?["media"].take();
+        let mut list: Vec<&Value> = m["audioFiles"].as_array().into_iter().flatten().collect();
+        list.sort_by_key(|f| f["index"].as_i64().unwrap_or(0));
+        let mut start = 0.0;
+        let files: Vec<RemoteFile> = list.iter()
+            .map(|f| {
+                let md = &f["metadata"];
+                let ext = md["ext"].as_str().map(str::to_string)
+                    .unwrap_or_else(|| s(&md["filename"]).rsplit_once('.').map(|(_, e)| format!(".{e}")).unwrap_or_default());
+                let duration = f["duration"].as_f64().unwrap_or(0.0);
+                let r = RemoteFile { path: format!("/api/items/{id}/file/{}", s(&f["ino"])), ext, size: md["size"].as_u64().unwrap_or(0), start };
+                start += duration;
+                r
             })
             .collect();
-        Ok(Session { id: s(&v["id"]), start: v["currentTime"].as_f64().unwrap_or(0.0), duration, tracks, chapters })
+        if files.is_empty() {
+            return Err("This book has no audio".into());
+        }
+        let duration = m["duration"].as_f64().unwrap_or(start);
+        Ok((files, duration, chapters_of(&m["chapters"], duration)))
+    }
+
+    /// Fetches `bytes=from-to` of a server file (`to` inclusive), with this user's token.
+    pub fn range(&self, path: &str, from: u64, to: u64) -> Result<reqwest::blocking::Response, String> {
+        let res = self.http.get(format!("{}{path}", self.base)).bearer_auth(&self.token).header("Range", format!("bytes={from}-{to}")).send()
+            .map_err(|_| "Can't reach the server. Check your connection".to_string())?;
+        if !res.status().is_success() {
+            return Err(format!("The server answered {}", res.status()));
+        }
+        Ok(res)
     }
 
     /// This user's bookmarks in one book, in book order.

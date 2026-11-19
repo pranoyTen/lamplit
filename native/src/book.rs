@@ -1,6 +1,6 @@
 // Chapters, bookmarks and the sleep timer: the rules, kept apart from the UI so they can be tested. Same behaviour as the Tauri app.
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Chapter {
     pub start: f64,
     pub end: f64,
