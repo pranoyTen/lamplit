@@ -64,7 +64,7 @@ fn mini(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     if cfg!(target_os = "macos") {
         b = b.transparent(true).effects(WindowEffectsConfig { effects: vec![Effect::Popover], state: Some(EffectState::Active), radius: Some(12.0), color: None, interactive: false });
     }
-    b.build().ok()
+    b.build().map_err(|e| eprintln!("mini player: {e}")).ok()
 }
 
 fn toggle_mini(app: &tauri::AppHandle, icon: tauri::Rect) {
@@ -148,10 +148,18 @@ fn main() {
                 api.prevent_close();
                 let _ = w.hide();
             }
+            // while its web view starts, Windows reports the new window losing focus and getting it back in the same millisecond,
+            // so close only when it is still unfocused a moment later
             WindowEvent::Focused(false) if w.label() == "mini" => {
-                MINI_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
-                let _ = w.destroy();
+                let w = w.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    if !w.is_focused().unwrap_or(false) {
+                        let _ = w.destroy();
+                    }
+                });
             }
+            WindowEvent::Destroyed if w.label() == "mini" => MINI_HIDDEN_AT.store(now_ms(), Ordering::Relaxed),
             _ => {}
         })
         .plugin(tauri_plugin_http::init())
