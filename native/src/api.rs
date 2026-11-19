@@ -103,6 +103,11 @@ impl Client {
         self.call(reqwest::Method::POST, &path, Some(json!({ "currentTime": current, "timeListened": listened }))).map(|_| ())
     }
 
+    /// The cover as a plain URL (the token rides in the query), for places that fetch it themselves, like the OS media overlay.
+    pub fn cover_url(&self, id: &str) -> String {
+        format!("{}/api/items/{id}/cover?width=400&token={}", self.base, self.token)
+    }
+
     /// A blocking HTTP client that sends this user's token, for streaming audio.
     pub fn http(&self) -> (reqwest::blocking::Client, String) {
         (self.http.clone(), self.token.clone())

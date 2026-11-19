@@ -85,3 +85,20 @@ export component AppWindow inherits Window {
         }
     }
 }
+
+// The tray icon. Left-click shows the window; the menu also plays or pauses, and quits (closing the window only hides it).
+export component Tray inherits SystemTrayIcon {
+    icon: @image-url("icons/tray.png");
+    tooltip: "Lectern";
+    in property <bool> has-book;
+    in property <bool> playing;
+    callback show-window();
+    callback toggle();
+    callback quit();
+    clicked => { root.show-window(); }
+    Menu {
+        MenuItem { title: "Show Lectern"; activated => { root.show-window(); } }
+        MenuItem { title: root.playing ? "Pause" : "Play"; enabled: root.has-book; activated => { root.toggle(); } }
+        MenuItem { title: "Quit"; activated => { root.quit(); } }
+    }
+}

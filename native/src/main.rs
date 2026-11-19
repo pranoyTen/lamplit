@@ -3,11 +3,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod api;
 mod http_source;
+mod media;
 mod player;
 mod stretch;
 
 use api::{Book, Client};
 use player::Engine;
+use souvlaki::{MediaControlEvent, SeekDirection};
 use slint::{ComponentHandle, ModelRc, SharedString, StandardListViewItem, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
 use std::sync::atomic::Ordering::Relaxed;
@@ -31,6 +33,48 @@ struct App {
     books: Vec<Book>,
     playing: Option<Playing>,
     speed: f64,
+    media: Option<souvlaki::MediaControls>,
+    shown: (Option<bool>, Instant), // the play state last published to the OS overlay and the tray, and when
+}
+
+// one set of actions for the window's buttons, the tray menu and the media keys
+fn toggle() {
+    let paused = with_app(|a| {
+        if a.out.is_paused() { a.out.play() } else { a.out.pause() }
+        a.out.is_paused()
+    });
+    if paused {
+        report(false);
+    }
+}
+
+fn set_paused(paused: bool) {
+    if with_app(|a| a.out.is_paused()) != paused {
+        toggle();
+    }
+}
+
+fn skip(d: f64) {
+    with_app(|a| if let Some(p) = &a.playing { p.engine.seek((p.engine.status.pos() + d).min(p.duration)) });
+}
+
+fn seek(t: f64) {
+    with_app(|a| if let Some(p) = &a.playing { p.engine.seek(t) });
+}
+
+// Next and Previous have no chapters to move between yet, so they skip forward 30 and back 15 like the buttons
+fn media_event(e: MediaControlEvent) {
+    match e {
+        MediaControlEvent::Play => set_paused(false),
+        MediaControlEvent::Pause | MediaControlEvent::Stop => set_paused(true),
+        MediaControlEvent::Toggle => toggle(),
+        MediaControlEvent::Next | MediaControlEvent::Seek(SeekDirection::Forward) => skip(30.0),
+        MediaControlEvent::Previous | MediaControlEvent::Seek(SeekDirection::Backward) => skip(-15.0),
+        MediaControlEvent::SeekBy(SeekDirection::Forward, d) => skip(d.as_secs_f64()),
+        MediaControlEvent::SeekBy(SeekDirection::Backward, d) => skip(-d.as_secs_f64()),
+        MediaControlEvent::SetPosition(p) => seek(p.0.as_secs_f64()),
+        _ => {}
+    }
 }
 
 thread_local! {
@@ -128,7 +172,7 @@ fn play_book(ui: &AppWindow, i: usize) {
     ui.set_message(format!("Opening {}…", book.title).into());
     let weak = ui.as_weak();
     background(
-        move || client.play(&book.id).map(|s| (client, s)),
+        { let id = book.id.clone(); move || client.play(&id).map(|s| (client, s)) },
         move |r| {
             let Some(ui) = weak.upgrade() else { return };
             let (client, s) = match r {
@@ -149,16 +193,33 @@ fn play_book(ui: &AppWindow, i: usize) {
             ui.set_now_title(book.title.clone().into());
             ui.set_duration(s.duration as f32);
             ui.set_has_book(true);
-            with_app(|a| a.playing = Some(Playing { engine, session: s.id, title: book.title, duration: s.duration, listened: 0.0, last_tick: Instant::now() }));
+            let cover = client.cover_url(&book.id);
+            with_app(|a| {
+                if let Some(m) = a.media.as_mut() {
+                    media::show_book(m, &book.title, &book.author, &cover, s.duration);
+                }
+                a.shown.0 = None;
+                a.playing = Some(Playing { engine, session: s.id, title: book.title, duration: s.duration, listened: 0.0, last_tick: Instant::now() });
+            });
         },
     );
 }
 
-// four times a second: move the position bar, show errors and the end of the book, and report progress every 15 seconds heard
-fn tick(ui: &AppWindow) {
+// four times a second: move the position bar, show errors and the end of the book, keep the OS overlay and the tray in step,
+// and report progress every 15 seconds heard
+fn tick(ui: &AppWindow, tray: &Tray) {
     let due = with_app(|a| {
         let paused = a.out.is_paused();
         let Some(p) = a.playing.as_mut() else { return false };
+        let playing = !paused && p.engine.status.state.load(Relaxed) == player::PLAYING;
+        // the overlay moves its own timeline while playing, so it only needs the state on a change and a correction now and then
+        if a.shown.0 != Some(playing) || a.shown.1.elapsed() > Duration::from_secs(5) {
+            if let Some(m) = a.media.as_mut() {
+                media::show_state(m, Some(playing), p.engine.status.pos());
+            }
+            tray.set_playing(playing);
+            a.shown = (Some(playing), Instant::now());
+        }
         let now = Instant::now();
         let state = p.engine.status.state.load(Relaxed);
         if !paused && state == player::PLAYING {
@@ -188,7 +249,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()?;
     sink.log_on_drop(false);
     let out = rodio::Player::connect_new(sink.mixer());
-    APP.with(|a| *a.borrow_mut() = Some(App { _sink: sink, out, client: None, books: vec![], playing: None, speed: 1.0 }));
+    APP.with(|a| *a.borrow_mut() = Some(App { _sink: sink, out, client: None, books: vec![], playing: None, speed: 1.0, media: None, shown: (None, Instant::now()) }));
 
     let ui = AppWindow::new()?;
 
@@ -223,17 +284,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let w = ui.as_weak();
     ui.on_pick(move |i| play_book(&w.unwrap(), i as usize));
-    ui.on_toggle(|| {
-        let paused = with_app(|a| {
-            if a.out.is_paused() { a.out.play() } else { a.out.pause() }
-            a.out.is_paused()
-        });
-        if paused {
-            report(false);
-        }
-    });
-    ui.on_skip(|d| with_app(|a| if let Some(p) = &a.playing { p.engine.seek((p.engine.status.pos() + d as f64).min(p.duration)) }));
-    ui.on_seek(|t| with_app(|a| if let Some(p) = &a.playing { p.engine.seek(t as f64) }));
+    ui.on_toggle(toggle);
+    ui.on_skip(|d| skip(d as f64));
+    ui.on_seek(|t| seek(t as f64));
     ui.on_speed(|v| {
         let s: f64 = v.trim_end_matches('×').parse().unwrap_or(1.0);
         with_app(|a| {
@@ -244,11 +297,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     });
 
-    let timer = Timer::default();
+    // closing the window only hides it (Slint's default) and playback goes on; the tray brings it back or quits
+    let tray = Tray::new()?;
     let w = ui.as_weak();
-    timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
+    tray.on_show_window(move || {
         if let Some(ui) = w.upgrade() {
-            tick(&ui);
+            let _ = ui.show();
+        }
+    });
+    tray.on_toggle(toggle);
+    tray.on_quit(|| {
+        let _ = slint::quit_event_loop();
+    });
+    tray.show()?;
+
+    let timer = Timer::default();
+    let (w, t) = (ui.as_weak(), tray.as_weak());
+    timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
+        if let (Some(ui), Some(tray)) = (w.upgrade(), t.upgrade()) {
+            tick(&ui, &tray);
         }
     });
 
@@ -256,7 +323,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.set_server(c.base.clone().into());
         show_books(&ui, c);
     }
-    ui.run()?;
+    ui.show()?;
+    // media keys need the window's handle, which exists once it is shown
+    let controls = media::register(ui.window(), |e| {
+        let _ = slint::invoke_from_event_loop(move || media_event(e));
+    });
+    with_app(|a| a.media = controls);
+    slint::run_event_loop_until_quit()?;
     if let Some(t) = stop_book() {
         let _ = t.join(); // the closing progress report
     }
