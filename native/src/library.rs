@@ -77,7 +77,7 @@ mod tests {
     use super::*;
 
     fn b(id: &str, title: &str, author: &str, duration: f64, added: f64) -> Book {
-        Book { id: id.into(), title: title.into(), author: author.into(), duration, added }
+        Book { id: id.into(), title: title.into(), author: author.into(), duration, added, library_id: String::new() }
     }
 
     #[test]

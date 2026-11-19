@@ -9,6 +9,7 @@ mod eq;
 mod http_source;
 mod library;
 mod media;
+mod metered;
 mod mini;
 mod player;
 mod stats;
@@ -73,6 +74,7 @@ struct App {
     prefs: Prefs,
     places: HashMap<String, f64>, // where each book was left, kept here for listening offline
     update: Option<std::sync::Arc<cargo_packager_updater::Update>>, // a newer release found by the last check
+    libs: Vec<(String, String)>, // the book libraries: id and name
     gains: Arc<eq::Gains>,
     eq_model: Rc<VecModel<f32>>,
     paused_at: Option<Instant>, // when playback was last paused, for the rewind after a long pause
@@ -92,15 +94,29 @@ struct Prefs {
     auto_next: bool,
     eq: [f32; 5],
     gh_token: String, // shortcut: kept in the settings file like the Tauri app kept it; drop it once the repository is public
+    speeds: HashMap<String, f64>, // a speed picked on the player for one book wins over the default `speed`
+    sleep: i32,                   // the default sleep timer: 0 off, 1-3 for 15, 30 or 45 minutes, 4 end of chapter
+    tray: bool,                   // closing the window keeps Lectern in the tray; off, closing quits
+    sync: bool,                   // off: no progress reports, and books start where this computer left them
+    metered: bool,                // download on metered connections too
+    hidden_libs: Vec<String>,
+    volume: f32,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false, back: 15, fwd: 30, rewind: true, auto_next: true, eq: [0.0; 5], gh_token: String::new() }
+        Prefs {
+            dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false, back: 15, fwd: 30, rewind: true, auto_next: true,
+            eq: [0.0; 5], gh_token: String::new(), speeds: HashMap::new(), sleep: 0, tray: true, sync: true, metered: false,
+            hidden_libs: vec![], volume: 1.0,
+        }
     }
 }
 
-const LIMITS_GB: [u64; 5] = [0, 5, 10, 20, 50];
+// downloads on a metered connection; read by the download worker
+static METERED_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const SLEEPS: [f64; 3] = [15.0, 30.0, 45.0];
+const LIMITS_GB: [u64; 5] = [5, 10, 20, 50, 0];
 const BACKS: [u32; 3] = [10, 15, 30];
 const FWDS: [u32; 3] = [15, 30, 60];
 
@@ -181,18 +197,20 @@ fn config_dir() -> Option<std::path::PathBuf> {
     Some(dirs::config_dir()?.join("lectern-native"))
 }
 
-fn save_session(c: Option<&Client>) {
+fn save_session(c: Option<(&Client, &str)>) {
     let Some(d) = config_dir() else { return };
     let p = d.join("session.json");
     let _ = match c {
-        Some(c) => std::fs::create_dir_all(&d).and_then(|_| std::fs::write(&p, serde_json::json!({ "server": c.base, "token": c.token }).to_string())),
+        Some((c, user)) => std::fs::create_dir_all(&d)
+            .and_then(|_| std::fs::write(&p, serde_json::json!({ "server": c.base, "token": c.token, "username": user }).to_string())),
         None => std::fs::remove_file(&p),
     };
 }
 
-fn load_session() -> Option<Client> {
+/// The saved sign-in: the client and the username.
+fn load_session() -> Option<(Client, String)> {
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(config_dir()?.join("session.json")).ok()?).ok()?;
-    Client::new(v["server"].as_str()?, v["token"].as_str()?).ok()
+    Some((Client::new(v["server"].as_str()?, v["token"].as_str()?).ok()?, v["username"].as_str().unwrap_or_default().to_string()))
 }
 
 fn save_json(name: &str, v: &impl serde::Serialize) {
@@ -220,6 +238,8 @@ struct Offline {
     books: Vec<Book>,
     in_progress: Vec<Book>,
     progress: HashMap<String, f64>,
+    #[serde(default)]
+    libs: Vec<(String, String)>, // id and name
 }
 
 /// The tray icon as RGBA pixels, decoded from the PNG built into the exe.
@@ -355,7 +375,8 @@ fn show_series() {
 
 fn fill_series() {
     with_app(|a| {
-        let rows: Vec<BookCard> = a.series.iter()
+        let series: Vec<api::Series> = a.series.iter().filter(|s| s.books.iter().any(|b| shown(a, b))).cloned().collect(); // series of hidden libraries go too
+        let rows: Vec<BookCard> = series.iter()
             .map(|s| BookCard {
                 id: s.id.clone().into(),
                 cover_id: s.books.first().map(|b| b.id.clone()).unwrap_or_default().into(),
@@ -488,10 +509,12 @@ fn refresh_library() {
     let query = st.get_query().to_string();
     let count = with_app(|a| {
         a.covers.drop_queued();
-        let shown: Vec<Book> = library::visible(&a.books, &a.progress, &a.downloaded, &query, filter, sort).into_iter().cloned().collect();
+        let books: Vec<Book> = a.books.iter().filter(|b| shown(a, b)).cloned().collect();
+        let total = books.len();
+        let shown: Vec<Book> = library::visible(&books, &a.progress, &a.downloaded, &query, filter, sort).into_iter().cloned().collect();
         let rows: Vec<BookCard> = shown.iter().map(|b| card(a, b)).collect();
         a.library.set_vec(rows);
-        (shown.len(), a.books.len())
+        (shown.len(), total)
     });
     st.set_library_count(if count.0 == count.1 { format!("{} books", count.1) } else { format!("{} of {} books", count.0, count.1) }.into());
     covers_needed("library", 0, 29);
@@ -501,10 +524,10 @@ fn refresh_home() {
     let Some(ui) = window() else { return };
     let st = ui.global::<State>();
     let (hero, ids) = with_app(|a| {
-        let in_progress = a.in_progress.clone();
+        let in_progress: Vec<Book> = a.in_progress.iter().filter(|b| shown(a, b)).cloned().collect();
         let hero = in_progress.first().map(|b| (card(a, b), b.duration));
         let cont: Vec<BookCard> = in_progress.iter().skip(1).take(12).map(|b| card(a, b)).collect();
-        let mut recent: Vec<Book> = a.books.clone();
+        let mut recent: Vec<Book> = a.books.iter().filter(|b| shown(a, b)).cloned().collect();
         recent.sort_by(|x, y| y.added.total_cmp(&x.added));
         let recent: Vec<BookCard> = recent.iter().take(12).map(|b| card(a, b)).collect();
         let ids: Vec<String> = hero.iter().map(|h| h.0.id.to_string()).chain(cont.iter().chain(&recent).map(|c| c.id.to_string())).collect();
@@ -524,8 +547,8 @@ fn refresh_home() {
     }
 }
 
-/// Fetches the books, progress and books in progress, then fills Home and the Library.
-fn load_library(client: Client) {
+/// Fetches the libraries, books, progress and books in progress, then fills Home and the Library.
+fn load_library(client: Client, username: String) {
     let Some(ui) = window() else { return };
     let st = ui.global::<State>();
     st.set_busy(true);
@@ -534,11 +557,14 @@ fn load_library(client: Client) {
             let r = client.books().map(|books| {
                 let progress = client.progress().unwrap_or_default();
                 let in_progress = client.in_progress().unwrap_or_default();
-                Offline { books, in_progress, progress }
+                let libs = client.libraries().unwrap_or_default();
+                Offline { books, in_progress, progress, libs }
             });
-            (client, r)
+            // a sign-in saved before the username was kept: ask the server
+            let username = if username.is_empty() { client.username().unwrap_or_default() } else { username };
+            (client, r, username)
         },
-        |(client, r)| {
+        move |(client, r, username)| {
             let Some(ui) = window() else { return };
             let st = ui.global::<State>();
             st.set_busy(false);
@@ -562,11 +588,15 @@ fn load_library(client: Client) {
             st.set_message(SharedString::new());
             st.set_signed_in(true);
             st.set_signed_in_as(format!("Signed in to {}", client.base).into());
-            save_session(Some(&client));
+            st.set_username(username.clone().into());
+            st.set_user_initial(username.chars().next().map_or("?".to_string(), |c| c.to_uppercase().to_string()).into());
+            st.set_server_address(client.base.clone().into());
+            save_session(Some((&client, &username)));
             with_app(|a| {
                 a.dl.set_client((!offline).then(|| client.clone())); // downloads wait for a connection
-                (a.client, a.books, a.progress, a.in_progress) = (Some(client), lib.books, lib.progress, lib.in_progress);
+                (a.client, a.books, a.progress, a.in_progress, a.libs) = (Some(client), lib.books, lib.progress, lib.in_progress, lib.libs);
             });
+            show_libraries();
             refresh_home();
             refresh_library();
             if st.get_route() == "settings" {
@@ -574,6 +604,49 @@ fn load_library(client: Client) {
             }
         },
     );
+}
+
+// ---- libraries shown and hidden (Settings > Libraries) ----
+/// A book shows on Home, in the Library and in Series unless its library is hidden.
+fn shown(a: &App, b: &Book) -> bool {
+    b.library_id.is_empty() || !a.prefs.hidden_libs.contains(&b.library_id)
+}
+
+fn show_libraries() {
+    let Some(ui) = window() else { return };
+    let rows: Vec<LibRow> = with_app(|a| {
+        let on = a.libs.iter().filter(|(id, _)| !a.prefs.hidden_libs.contains(id)).count();
+        a.libs.iter()
+            .map(|(id, name)| {
+                let visible = !a.prefs.hidden_libs.contains(id);
+                LibRow {
+                    id: id.clone().into(),
+                    name: name.clone().into(),
+                    on: visible,
+                    locked: visible && on < 2, // at least one library stays on
+                    note: if !visible { "Hidden".into() } else if on < 2 { "Shown in the sidebar and on Home. At least one library stays on".into() } else { "Shown in the sidebar and on Home".into() },
+                }
+            })
+            .collect()
+    });
+    ui.global::<State>().set_libraries(ModelRc::new(VecModel::from(rows)));
+}
+
+fn toggle_library(id: String) {
+    with_app(|a| {
+        if let Some(i) = a.prefs.hidden_libs.iter().position(|x| *x == id) {
+            a.prefs.hidden_libs.remove(i);
+        } else if a.libs.iter().filter(|(l, _)| !a.prefs.hidden_libs.contains(l)).count() > 1 {
+            a.prefs.hidden_libs.push(id);
+        }
+    });
+    save_prefs();
+    show_libraries();
+    refresh_home();
+    refresh_library();
+    if with_app(|a| !a.series.is_empty()) {
+        fill_series();
+    }
 }
 
 // ---- downloads ----
@@ -620,6 +693,8 @@ fn refresh_downloads() {
     st.set_dl_summary(format!("{} {} · {} on disk{}", items.len(), if items.len() == 1 { "book" } else { "books" }, gb(bytes),
         if limit > 0 { format!(" of {}", gb(limit)) } else { String::new() }).into());
     st.set_dl_folder(folder.to_string_lossy().to_string().into());
+    st.set_dl_custom_folder(with_app(|a| a.prefs.folder.is_some()));
+    st.set_dl_used(gb(bytes).into());
     st.set_downloads(ModelRc::new(VecModel::from(rows)));
     // the Library's Downloaded filter follows finished downloads
     let now: HashSet<String> = items.iter().filter(|i| i.status == downloads::Status::Done).map(|i| i.id.clone()).collect();
@@ -726,12 +801,33 @@ fn toggle() {
         } else {
             a.out.pause();
             a.paused_at = Some(Instant::now());
+            // a pause ends the sleep timer, like the Tauri app; the default one starts again with the next play
+            if let Some(p) = a.playing.as_mut() {
+                p.sleep = Sleep::Off;
+            }
         }
-        a.out.is_paused()
+        (a.out.is_paused(), if a.out.is_paused() { None } else { start_default_sleep(a) })
     });
-    if paused {
+    if let Some(ui) = window() {
+        let st = ui.global::<State>();
+        if paused.0 {
+            st.set_sleep_index(0);
+        } else if let Some(i) = paused.1 {
+            st.set_sleep_index(i);
+        }
+    }
+    if paused.0 {
         report(false);
     }
+}
+
+/// Up and Down: volume in steps of 5%.
+fn volume_step(d: f32) {
+    with_app(|a| {
+        a.prefs.volume = (a.prefs.volume + d).clamp(0.0, 1.0);
+        a.out.set_volume(a.prefs.volume);
+    });
+    save_prefs();
 }
 
 fn set_paused(paused: bool) {
@@ -779,18 +875,60 @@ fn media_event(e: MediaControlEvent) {
     }
 }
 
+/// A speed picked on the player: it applies now and is remembered for this book.
 fn set_speed(s: f64) {
+    with_app(|a| {
+        a.speed = s;
+        if let Some(p) = &a.playing {
+            p.engine.set_speed(s);
+            a.prefs.speeds.insert(p.id.clone(), s);
+        }
+    });
+    save_prefs();
+    if let Some(ui) = window() {
+        ui.global::<State>().set_speed(s as f32);
+    }
+}
+
+/// Settings > Default speed: for books whose speed hasn't been changed on the player, including the one playing.
+fn set_default_speed(s: f64) {
+    let follow = with_app(|a| {
+        a.prefs.speed = s;
+        a.playing.as_ref().is_some_and(|p| !a.prefs.speeds.contains_key(&p.id))
+    });
+    save_prefs();
+    if follow {
+        set_speed_now(s);
+    }
+    if let Some(ui) = window() {
+        ui.global::<State>().set_default_speed(s as f32);
+    }
+}
+
+/// Changes the playing speed without remembering it for the book.
+fn set_speed_now(s: f64) {
     with_app(|a| {
         a.speed = s;
         if let Some(p) = &a.playing {
             p.engine.set_speed(s);
         }
     });
-    with_app(|a| a.prefs.speed = s);
-    save_prefs();
     if let Some(ui) = window() {
         ui.global::<State>().set_speed(s as f32);
     }
+}
+
+/// The default sleep timer (Settings), started when play is pressed. Returns the player's sleep menu index for it.
+fn start_default_sleep(a: &mut App) -> Option<i32> {
+    let p = a.playing.as_mut()?;
+    if p.sleep != Sleep::Off || a.prefs.sleep == 0 {
+        return None;
+    }
+    p.sleep = match a.prefs.sleep {
+        1..=3 => Sleep::At(now_s() + SLEEPS[a.prefs.sleep as usize - 1] * 60.0),
+        _ => book::chapter_at(&p.chapters, p.engine.status.pos()).map_or(Sleep::Off, Sleep::ChapterEnd),
+    };
+    Some(if a.prefs.sleep == 4 { 5 } else { a.prefs.sleep })
 }
 
 /// Remembers the place on this computer, and tells the server in the background when there is a session; `close` ends it.
@@ -802,6 +940,9 @@ fn report(close: bool) -> Option<std::thread::JoinHandle<()>> {
         p.listened = 0.0;
         a.places.insert(p.id.clone(), pos);
         save_json("places.json", &a.places);
+        if !a.prefs.sync {
+            return None; // Settings > Sync progress is off
+        }
         let (c, session) = (a.client.clone()?, p.session.clone()?);
         Some(std::thread::spawn(move || {
             if let Err(e) = c.sync(&session, pos, listened, close) {
@@ -857,12 +998,20 @@ fn play_book(id: String) {
         move |r| {
             let Some(ui) = window() else { return };
             let st = ui.global::<State>();
-            let (client, s, bookmarks) = match r {
+            let (client, mut s, bookmarks) = match r {
                 Ok(v) => v,
                 Err(e) => return st.set_message(e.into()),
             };
             st.set_message(SharedString::new());
-            let speed = with_app(|a| a.speed);
+            // a speed picked for this book wins over the default; with sync off, the book starts where this computer left it
+            let (speed, place, sync) = with_app(|a| (a.prefs.speeds.get(&book.id).copied().unwrap_or(a.prefs.speed), a.places.get(&book.id).copied(), a.prefs.sync));
+            if !sync {
+                if let Some(t) = place {
+                    s.start = t;
+                }
+            }
+            with_app(|a| a.speed = speed);
+            st.set_speed(speed as f32);
             let (http, token) = client.http();
             let engine = Engine::spawn(http, token, s.tracks, s.start, speed, with_app(|a| a.gains.clone()), |out| {
                 let _ = slint::invoke_from_event_loop(move || {
@@ -894,6 +1043,9 @@ fn play_book(id: String) {
                     chapters: s.chapters, bookmarks, shown_chapter: None, sleep: Sleep::Off,
                 });
             });
+            if let Some(i) = with_app(start_default_sleep) {
+                st.set_sleep_index(i);
+            }
         },
     );
 }
@@ -1059,9 +1211,10 @@ fn check_updates() {
         Ok(Some(u)) => {
             let (v, notes) = (u.version.clone(), u.body.clone().unwrap_or_default());
             with_app(|a| a.update = Some(std::sync::Arc::new(u)));
-            upd_status(false, &notes, &v);
+            upd_status(false, &if notes.is_empty() { format!("Version {v} is available") } else { format!("Version {v} is available
+{notes}") }, &v);
         }
-        Ok(None) => upd_status(false, &format!("Lectern {} is the latest version", updater::current()), ""),
+        Ok(None) => upd_status(false, "You have the latest version", ""),
         Err(e) => upd_status(false, &e, ""),
     });
 }
@@ -1143,7 +1296,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || {
             let _ = slint::invoke_from_event_loop(refresh_downloads);
         },
+        || METERED_OK.load(Relaxed) || !metered::is_metered(),
     );
+    METERED_OK.store(prefs.metered, Relaxed);
     let (library, continuing, recent) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
     let (series_model, series_books, finished_model) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
     let gains = Arc::new(eq::Gains::default());
@@ -1155,7 +1310,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             library: library.clone(), continuing: continuing.clone(), recent: recent.clone(), covers, playing: None, speed: prefs.speed,
             series: vec![], series_model: series_model.clone(), series_books: series_books.clone(), finished_model: finished_model.clone(), listening: None,
             media: None, shown: (None, Instant::now()), dl, downloaded: HashSet::new(), prefs: prefs.clone(),
-            places: load_json("places.json").unwrap_or_default(), gains: gains.clone(), eq_model: eq_model.clone(), paused_at: None, update: None,
+            places: load_json("places.json").unwrap_or_default(), gains: gains.clone(), eq_model: eq_model.clone(), paused_at: None, update: None, libs: vec![],
         })
     });
 
@@ -1242,10 +1397,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let (server, user, pass) = (server.to_string(), user.to_string(), pass.to_string());
         background(move || Client::login(&server, &user, &pass), |r| match r {
-            Ok(c) => load_library(c),
+            Ok((c, user)) => {
+                if let Some(ui) = window() {
+                    ui.global::<State>().set_sign_in_error(SharedString::new());
+                }
+                load_library(c, user)
+            }
             Err(e) => {
                 if let Some(ui) = window() {
-                    ui.global::<State>().set_busy(false);
+                    let st = ui.global::<State>();
+                    st.set_busy(false);
+                    st.set_sign_in_error(e.clone().into());
                 }
                 say(e);
             }
@@ -1299,6 +1461,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     st.on_check_updates(check_updates);
     st.on_install_update(install_update);
+    st.set_default_speed(prefs.speed as f32);
+    st.set_sleep_default(prefs.sleep);
+    st.set_tray(prefs.tray);
+    st.set_sync(prefs.sync);
+    st.set_metered(prefs.metered);
+    with_app(|a| a.out.set_volume(prefs.volume));
+    st.on_toggle_library(|id| toggle_library(id.to_string()));
+    st.on_set_default_speed(|s| set_default_speed(s as f64));
+    st.on_set_sleep_default(|i| {
+        with_app(|a| a.prefs.sleep = i.clamp(0, 4));
+        save_prefs();
+    });
+    st.on_set_tray(|on| {
+        with_app(|a| a.prefs.tray = on);
+        save_prefs();
+    });
+    st.on_set_sync(|on| {
+        with_app(|a| a.prefs.sync = on);
+        save_prefs();
+    });
+    st.on_set_metered(|on| {
+        METERED_OK.store(on, Relaxed);
+        with_app(|a| {
+            a.prefs.metered = on;
+            a.dl.pause(a.dl.paused()); // wakes the queue so it looks again now
+        });
+        save_prefs();
+    });
+    st.on_use_default_folder(|| {
+        with_app(|a| {
+            a.prefs.folder = None;
+            a.dl.set_folder(default_folder());
+        });
+        save_prefs();
+        refresh_downloads();
+    });
+    st.on_volume_step(|d| volume_step(d));
 
     st.on_toggle(toggle);
     st.on_skip(|d| skip(d as f64));
@@ -1408,11 +1607,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     ui.show()?;
+    // closing the window hides it and Lectern keeps playing from the tray, unless that is turned off in Settings
+    ui.window().on_close_requested(|| {
+        if !with_app(|a| a.prefs.tray) {
+            let _ = slint::quit_event_loop();
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
     covers::set_scale(ui.window().scale_factor()); // known once the window is on a screen, and needed before the first cover
     match load_session() {
-        Some(c) => {
+        Some((c, user)) => {
             ui.set_server(c.base.clone().into());
-            load_library(c);
+            load_library(c, user);
         }
         None => st.set_route("settings".into()),
     }
