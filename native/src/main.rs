@@ -105,6 +105,20 @@ fn load_session() -> Option<Client> {
     Client::new(v["server"].as_str()?, v["token"].as_str()?).ok()
 }
 
+/// The tray icon as RGBA pixels, decoded from the PNG built into the exe.
+fn tray_icon() -> Option<slint::Image> {
+    let mut d = png::Decoder::new(std::io::Cursor::new(include_bytes!("../ui/icons/tray.png")));
+    d.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
+    let mut r = d.read_info().ok()?;
+    let mut buf = vec![0; r.output_buffer_size()?];
+    let info = r.next_frame(&mut buf).ok()?;
+    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
+    let px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&buf[..info.buffer_size()], info.width, info.height);
+    Some(slint::Image::from_rgba8(px))
+}
+
 fn clock(t: f64) -> String {
     let t = t.max(0.0) as u64;
     let (h, m, s) = (t / 3600, t % 3600 / 60, t % 60);
@@ -299,6 +313,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // closing the window only hides it (Slint's default) and playback goes on; the tray brings it back or quits
     let tray = Tray::new()?;
+    match tray_icon() {
+        Some(i) => tray.set_image(i),
+        None => eprintln!("the tray icon could not be decoded"),
+    }
     let w = ui.as_weak();
     tray.on_show_window(move || {
         if let Some(ui) = w.upgrade() {

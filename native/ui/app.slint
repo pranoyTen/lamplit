@@ -88,7 +88,8 @@ export component AppWindow inherits Window {
 
 // The tray icon. Left-click shows the window; the menu also plays or pauses, and quits (closing the window only hides it).
 export component Tray inherits SystemTrayIcon {
-    icon: @image-url("icons/tray.png");
+    in property <image> image; // set from Rust as plain pixels: an image embedded for the software renderer cannot become a tray icon
+    icon: root.image;
     tooltip: "Lectern";
     in property <bool> has-book;
     in property <bool> playing;

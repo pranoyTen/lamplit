@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 dirs = "7.0.0"
+png = "0.18"
 raw-window-handle = "0.6"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 rodio = "0.23"

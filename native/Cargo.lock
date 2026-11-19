@@ -2707,6 +2707,7 @@ name = "lectern-native"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "png",
  "raw-window-handle",
  "reqwest",
  "rodio",
