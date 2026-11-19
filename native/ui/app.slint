@@ -1,154 +1,108 @@
-// A bare window to prove the playback core: sign in, pick a book, play it. The real screens come later.
-import { Button, LineEdit, Slider, StandardListView, ComboBox, VerticalBox, HorizontalBox } from "std-widgets.slint";
+// The main window: the sidebar, the current screen, and the player bar along the bottom.
+import { Theme, ThemeSync } from "theme.slint";
+import { Icons, Icon, Clickable, Btn, Muted } from "widgets.slint";
+import { State, BookCard, BookPage, Fact, ListRow } from "state.slint";
+import { HomePage, LibraryPage, BookScreen, SettingsPage } from "screens.slint";
+import { PlayerBar, PlayerPage } from "player.slint";
+
+export { State, Theme, BookCard, BookPage, Fact, ListRow }
+
+component NavItem inherits Clickable {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> current;
+    label: text;
+    height: 36px;
+    accessible-item-selected: current;
+    Rectangle { border-radius: 8px; background: root.hover && !root.current ? Theme.hover : transparent; }
+    HorizontalLayout {
+        padding-left: 8px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle { width: 2px; height: 16px; border-radius: 1px; background: root.current ? Theme.brand : transparent; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { d: root.icon; color: root.current ? Theme.brand : Theme.muted; }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.current ? Theme.ink : Theme.muted;
+            font-weight: root.current ? 500 : 400;
+        }
+    }
+}
 
 export component AppWindow inherits Window {
     title: "Lectern";
-    preferred-width: 1000px;
-    preferred-height: 680px;
+    preferred-width: 1180px;
+    preferred-height: 780px;
+    min-width: 760px;
+    min-height: 560px;
+    background: Theme.s100;
+    default-font-family: Theme.sans;
+    default-font-size: 14px;
+    in-out property <string> server; // the sign-in form's address, filled from the last sign-in
 
-    in property <bool> signed-in;
-    in-out property <string> server;
-    in-out property <string> username;
-    in-out property <string> password;
-    in property <bool> busy;
-    in property <string> message;
-    in property <[StandardListViewItem]> books;
-    in property <string> now-title;
-    in property <string> chapter-text;
-    in property <bool> has-book;
-    in property <bool> has-chapters;
-    in property <bool> playing;
-    // the seek bar spans the current chapter (or the whole book when there are none); values are book time
-    in property <float> seek-min;
-    in property <float> seek-max;
-    in-out property <float> position;
-    in property <string> pos-text;
-    in property <string> left-text;
-    in property <string> book-left;
-    in-out property <bool> seeking; // the listener is dragging the bar, so the timer leaves it alone
-    in property <[StandardListViewItem]> chapters;
-    in property <[StandardListViewItem]> bookmarks;
-    in-out property <int> sleep-index;
-    in property <string> sleep-text;
-
-    callback sign-in();
-    callback sign-out();
-    callback pick(int);
-    callback toggle();
-    callback skip(float);
-    callback seek(float);
-    callback speed(string);
-    callback chapter-step(int);
-    callback pick-chapter(int);
-    callback pick-bookmark(int);
-    callback add-bookmark();
-    callback remove-bookmark(int);
-    callback sleep(int);
-
-    VerticalBox {
-        if !root.signed-in: VerticalBox {
-            alignment: start;
-            Text { text: "Sign in to your Audiobookshelf server"; font-size: 18px; }
-            LineEdit { placeholder-text: "Server address, e.g. http://192.168.0.10:13378"; text <=> root.server; }
-            LineEdit { placeholder-text: "Username"; text <=> root.username; }
-            LineEdit { placeholder-text: "Password"; input-type: InputType.password; text <=> root.password; accepted => { root.sign-in(); } }
-            Button { text: "Sign in"; primary: true; enabled: !root.busy; clicked => { root.sign-in(); } }
-        }
-        if root.signed-in: HorizontalBox {
-            padding: 0;
-            Text { text: "Books"; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
-            Button { text: "Sign out"; clicked => { root.sign-out(); } }
-        }
-        if root.message != "": Text { text: root.message; wrap: word-wrap; }
-        HorizontalBox {
-            padding: 0;
-            vertical-stretch: 1;
-            if root.signed-in: StandardListView {
-                width: root.has-book ? 34% : 100%;
-                model: root.books;
-                current-item-changed(i) => { root.pick(i); }
+    ThemeSync {}
+    HorizontalLayout {
+        Rectangle {
+            width: 240px;
+            background: Theme.s200;
+            Rectangle { x: parent.width - 1px; width: 1px; background: Theme.hairline; }
+            VerticalLayout {
+                padding-top: 24px;
+                padding-bottom: 24px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 24px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    Text { text: "Lectern"; font-family: Theme.serif; font-weight: 600; font-size: 22px; color: Theme.ink; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    NavItem { text: "Home"; icon: Icons.home; current: State.route == "home"; enabled: State.signed-in; clicked => { State.route = "home"; } }
+                    NavItem { text: "Library"; icon: Icons.library; current: State.route == "library"; enabled: State.signed-in; clicked => { State.route = "library"; } }
+                    NavItem { text: "Settings"; icon: Icons.settings; current: State.route == "settings"; clicked => { State.route = "settings"; } }
+                }
+                Rectangle { vertical-stretch: 1; }
+                VerticalLayout {
+                    spacing: 12px;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    HorizontalLayout {
+                        alignment: start;
+                        Btn { icon: Icons.theme; text: "Theme: " + (Theme.dark ? "Dark" : "Light"); clicked => { State.toggle-theme(); } }
+                    }
+                    Muted { text: State.signed-in ? State.signed-in-as : "Not signed in"; font-size: 12px; wrap: word-wrap; }
+                }
             }
-            VerticalBox {
-                visible: root.has-book;
-                padding: 0;
-                Text { text: root.now-title; font-size: 16px; overflow: elide; }
-                Text { text: root.chapter-text; overflow: elide; }
-                Slider {
-                    minimum: root.seek-min;
-                    maximum: max(root.seek-max, root.seek-min + 1);
-                    value <=> root.position;
-                    changed => { root.seeking = true; }
-                    released(v) => {
-                        root.seeking = false;
-                        root.seek(v);
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            if State.message != "": Rectangle {
+                height: msg.preferred-height + 16px;
+                background: Theme.s200;
+                msg := Text { x: 32px; width: parent.width - 64px; text: State.message; color: Theme.ink; wrap: word-wrap; }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.hairline; }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                if State.route == "home": HomePage {}
+                if State.route == "library": LibraryPage {}
+                if State.route == "book": BookScreen {}
+                if State.route == "player": PlayerPage {}
+                if State.route == "settings": SettingsPage { server <=> root.server; }
+            }
+            if State.has-book && State.route != "player": PlayerBar {
+                open-player => {
+                    if State.route != "player" {
+                        State.back-route = State.route;
                     }
-                }
-                HorizontalBox {
-                    padding: 0;
-                    Text { text: root.pos-text; horizontal-stretch: 1; }
-                    Text { text: root.left-text; }
-                }
-                HorizontalBox {
-                    padding: 0;
-                    alignment: center;
-                    Button { text: "Previous"; enabled: root.has-chapters; clicked => { root.chapter-step(-1); } }
-                    Button { text: "Back 15"; clicked => { root.skip(-15); } }
-                    Button { text: root.playing ? "Pause" : "Play"; primary: true; clicked => { root.toggle(); } }
-                    Button { text: "Forward 30"; clicked => { root.skip(30); } }
-                    Button { text: "Next"; enabled: root.has-chapters; clicked => { root.chapter-step(1); } }
-                }
-                HorizontalBox {
-                    padding: 0;
-                    alignment: center;
-                    ComboBox {
-                        model: ["0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"];
-                        current-index: 1;
-                        selected(v) => { root.speed(v); }
-                    }
-                    ComboBox {
-                        model: ["Sleep: off", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "End of chapter"];
-                        current-index <=> root.sleep-index;
-                        selected => { root.sleep(root.sleep-index); }
-                    }
-                    Button { text: "Add bookmark"; clicked => { root.add-bookmark(); } }
-                }
-                HorizontalBox {
-                    padding: 0;
-                    Text { text: root.sleep-text; horizontal-stretch: 1; }
-                    Text { text: root.book-left; }
-                }
-                HorizontalBox {
-                    padding: 0;
-                    vertical-stretch: 1;
-                    VerticalBox {
-                        padding: 0;
-                        Text { text: "Chapters"; font-size: 14px; }
-                        StandardListView {
-                            model: root.chapters;
-                            // every click seeks, even on the row already selected
-                            item-pointer-event(i, e, p) => {
-                                if e.kind == PointerEventKind.up && e.button == PointerEventButton.left { root.pick-chapter(i); }
-                            }
-                        }
-                    }
-                    VerticalBox {
-                        padding: 0;
-                        Text { text: "Bookmarks"; font-size: 14px; }
-                        bm-list := StandardListView {
-                            model: root.bookmarks;
-                            item-pointer-event(i, e, p) => {
-                                if e.kind == PointerEventKind.up && e.button == PointerEventButton.left { root.pick-bookmark(i); }
-                            }
-                        }
-                        Button {
-                            text: "Remove selected bookmark";
-                            enabled: bm-list.current-item >= 0;
-                            clicked => {
-                                root.remove-bookmark(bm-list.current-item);
-                                bm-list.current-item = -1;
-                            }
-                        }
-                    }
+                    State.route = "player";
                 }
             }
         }

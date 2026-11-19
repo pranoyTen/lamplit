@@ -9,11 +9,65 @@ pub struct Client {
     http: reqwest::blocking::Client,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Book {
     pub id: String,
     pub title: String,
     pub author: String,
+    pub duration: f64,
+    pub added: f64,
+}
+
+/// Everything the book screen shows.
+#[derive(Clone, Debug, Default)]
+pub struct Details {
+    pub title: String,
+    pub subtitle: String,
+    pub authors: String,
+    pub narrators: String,
+    pub series: String,
+    pub genres: String,
+    pub published: String,
+    pub language: String,
+    pub description: String,
+    pub duration: f64,
+    pub chapters: usize,
+    pub progress: f64,
+    pub finished: bool,
+}
+
+fn book_of(i: &Value) -> Book {
+    let md = &i["media"]["metadata"];
+    Book {
+        id: s(&i["id"]),
+        title: s(&md["title"]),
+        author: md["authorName"].as_str().or(md["author"].as_str()).unwrap_or_default().into(),
+        duration: i["media"]["duration"].as_f64().unwrap_or(0.0),
+        added: i["addedAt"].as_f64().unwrap_or(0.0),
+    }
+}
+
+/// Book descriptions are HTML: keep the paragraphs, drop the tags.
+pub fn plain_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut tag = String::new();
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match (in_tag, ch) {
+            (false, '<') => (in_tag, tag) = (true, String::new()),
+            (true, '>') => {
+                in_tag = false;
+                let name = tag.trim_start_matches('/').split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+                if matches!(name.as_str(), "p" | "br" | "div" | "br/") && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+            (true, c) => tag.push(c),
+            (false, c) => out.push(c),
+        }
+    }
+    let out = out.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ");
+    out.trim().to_string()
 }
 
 #[derive(Clone, Debug)]
@@ -77,12 +131,63 @@ impl Client {
         let mut out = vec![];
         for l in libs["libraries"].as_array().into_iter().flatten().filter(|l| l["mediaType"] != "podcast") {
             let r = self.call(reqwest::Method::GET, &format!("/api/libraries/{}/items?limit=100&sort=media.metadata.title", s(&l["id"])), None)?;
-            for i in r["results"].as_array().into_iter().flatten() {
-                let md = &i["media"]["metadata"];
-                out.push(Book { id: s(&i["id"]), title: s(&md["title"]), author: md["authorName"].as_str().or(md["author"].as_str()).unwrap_or_default().into() });
-            }
+            out.extend(r["results"].as_array().into_iter().flatten().map(book_of));
         }
         Ok(out)
+    }
+
+    /// How far the user is in each book: 0..1, and 1 for finished.
+    pub fn progress(&self) -> Result<std::collections::HashMap<String, f64>, String> {
+        let me = self.call(reqwest::Method::GET, "/api/me", None)?;
+        Ok(me["mediaProgress"].as_array().into_iter().flatten()
+            .map(|p| (s(&p["libraryItemId"]), if p["isFinished"].as_bool() == Some(true) { 1.0 } else { p["progress"].as_f64().unwrap_or(0.0) }))
+            .collect())
+    }
+
+    /// Books started and not finished, most recent first.
+    pub fn in_progress(&self) -> Result<Vec<Book>, String> {
+        let r = self.call(reqwest::Method::GET, "/api/me/items-in-progress", None)?;
+        Ok(r["libraryItems"].as_array().into_iter().flatten().filter(|i| i["mediaType"] != "podcast").map(book_of).collect())
+    }
+
+    pub fn details(&self, id: &str) -> Result<Details, String> {
+        let i = self.call(reqwest::Method::GET, &format!("/api/items/{id}?expanded=1&include=progress"), None)?;
+        let (m, md, p) = (&i["media"], &i["media"]["metadata"], &i["userMediaProgress"]);
+        let names = |v: &Value, key: &str| v.as_array().into_iter().flatten().map(|x| if key.is_empty() { s(x) } else { s(&x[key]) }).filter(|x| !x.is_empty()).collect::<Vec<_>>().join(", ");
+        let series = md["series"].as_array().into_iter().flatten()
+            .map(|x| match x["sequence"].as_str() { Some(n) if !n.is_empty() => format!("{} #{n}", s(&x["name"])), _ => s(&x["name"]) })
+            .collect::<Vec<_>>().join(", ");
+        let year = md["publishedYear"].as_str().map(str::to_string).or(md["publishedYear"].as_i64().map(|y| y.to_string())).unwrap_or_default();
+        Ok(Details {
+            title: s(&md["title"]),
+            subtitle: s(&md["subtitle"]),
+            authors: names(&md["authors"], "name"),
+            narrators: names(&md["narrators"], ""),
+            series,
+            genres: names(&md["genres"], ""),
+            published: [s(&md["publisher"]), year].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(", "),
+            language: s(&md["language"]),
+            description: plain_text(md["description"].as_str().unwrap_or_default()),
+            duration: m["duration"].as_f64().unwrap_or(0.0),
+            chapters: m["chapters"].as_array().map_or(0, Vec::len),
+            progress: p["progress"].as_f64().unwrap_or(0.0),
+            finished: p["isFinished"].as_bool().unwrap_or(false),
+        })
+    }
+
+    pub fn set_finished(&self, id: &str, finished: bool) -> Result<(), String> {
+        self.call(reqwest::Method::PATCH, &format!("/api/me/progress/{id}"), Some(json!({ "isFinished": finished }))).map(|_| ())
+    }
+
+    /// A cover, decoded and scaled to fit `size` × `size`, as RGBA pixels.
+    pub fn cover(&self, id: &str, size: u32) -> Result<image::RgbaImage, String> {
+        let res = self.http.get(format!("{}/api/items/{id}/cover?width={size}", self.base)).bearer_auth(&self.token).send().map_err(|e| e.to_string())?;
+        if !res.status().is_success() {
+            return Err(format!("no cover ({})", res.status()));
+        }
+        let bytes = res.bytes().map_err(|e| e.to_string())?;
+        let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+        Ok(img.thumbnail(size, size).to_rgba8())
     }
 
     /// Opens a playback session: where the server last left off, and the audio files in play order.
@@ -141,5 +246,14 @@ impl Client {
     /// A blocking HTTP client that sends this user's token, for streaming audio.
     pub fn http(&self) -> (reqwest::blocking::Client, String) {
         (self.http.clone(), self.token.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn descriptions_become_plain_text() {
+        assert_eq!(super::plain_text("<p>One &amp; two.</p><p>Three<br/>four</p>"), "One & two.\nThree\nfour");
+        assert_eq!(super::plain_text("No tags"), "No tags");
     }
 }

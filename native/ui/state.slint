@@ -1,0 +1,110 @@
+// What the screens show and the actions they can ask for. Rust fills the properties and handles the callbacks.
+
+export struct BookCard {
+    id: string,
+    title: string,
+    author: string,
+    meta: string,      // "Author · 12h 4m"
+    progress: float,   // 0..1; shown as a bar between 0 and 1
+    cover: image,
+    tint: color,
+}
+
+export struct Fact {
+    k: string,
+    v: string,
+}
+
+export struct BookPage {
+    id: string,
+    title: string,
+    subtitle: string,
+    by: string,
+    series: string,
+    progress: float,
+    progress-text: string,
+    finished: bool,
+    description: string,
+    cover: image,
+    tint: color,
+    facts: [Fact],
+}
+
+export struct ListRow {
+    title: string,
+    sub: string,
+    current: bool,
+}
+
+export global State {
+    in-out property <string> route: "home"; // home, library, book, player, settings
+    in-out property <string> back-route: "home";
+    in property <bool> signed-in;
+    in property <string> signed-in-as;
+    in property <bool> busy;
+    in property <string> message;
+
+    // home
+    in property <bool> has-hero;
+    in property <BookCard> hero;
+    in property <string> hero-listened;
+    in property <string> hero-left;
+    in property <[BookCard]> continue-books;
+    in property <[BookCard]> recent-books;
+
+    // library
+    in property <[BookCard]> library;
+    in property <string> library-count;
+    in-out property <string> query;
+    in-out property <int> sort; // 0 title, 1 author, 2 recently added, 3 longest
+    in-out property <int> filter; // 0 all, 1 in progress, 2 not started, 3 finished
+
+    // one book
+    in property <BookPage> book;
+    in property <bool> book-loading;
+
+    // now playing
+    in property <bool> has-book;
+    in property <bool> playing;
+    in property <string> now-id;
+    in property <string> now-title;
+    in property <string> now-author;
+    in property <image> now-cover;
+    in property <color> now-tint;
+    in property <string> chapter-text;
+    in property <bool> has-chapters;
+    in property <float> seek-min;
+    in property <float> seek-max;
+    in-out property <float> position;
+    in-out property <bool> seeking;
+    in property <string> pos-text;
+    in property <string> left-text;
+    in property <string> book-left;
+    in property <float> speed: 1;
+    in property <[ListRow]> chapters;
+    in property <[ListRow]> bookmarks;
+    in-out property <int> sleep-index;
+    in property <string> sleep-text;
+    in property <int> back-secs: 15;
+    in property <int> fwd-secs: 30;
+
+    callback open-book(string);
+    callback play-book(string);
+    callback covers-needed(string, int, int); // which list ("library", "home"), first and last index on screen
+    callback refresh-library();
+    callback set-finished(string, bool);
+    callback sign-in(string, string, string);
+    callback sign-out();
+    callback toggle-theme();
+
+    callback toggle();
+    callback skip(float);
+    callback seek(float);
+    callback set-speed(float);
+    callback chapter-step(int);
+    callback pick-chapter(int);
+    callback pick-bookmark(int);
+    callback add-bookmark();
+    callback remove-bookmark(int);
+    callback sleep(int);
+}

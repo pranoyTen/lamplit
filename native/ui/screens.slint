@@ -1,0 +1,335 @@
+// Home, Library, one book, and Settings.
+import { ScrollView, LineEdit, ComboBox } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons, Icon, Clickable, Btn, Link, Bar, Card, Cover, H1, H2, Muted } from "widgets.slint";
+import { State, BookCard } from "state.slint";
+
+// a cover that plays the book, its title and author that open it, and a progress bar once started
+component BookTile {
+    in property <BookCard> book;
+    callback play();
+    callback open();
+    VerticalLayout {
+        spacing: 8px;
+        cover := Clickable {
+            label: "Play " + root.book.title;
+            height: self.width;
+            radius: 4px;
+            clicked => { root.play(); }
+            Cover { img: root.book.cover; title: root.book.title; tint: root.book.tint; }
+            Rectangle {
+                border-radius: 4px;
+                background: #00000073;
+                opacity: cover.hover ? 1 : 0;
+                animate opacity { duration: 150ms; }
+                Icon {
+                    d: State.playing && State.now-id == root.book.id ? Icons.pause : Icons.play;
+                    size: 40px;
+                    color: white;
+                    fill: State.playing && State.now-id == root.book.id ? transparent : white;
+                    stroke: 2.5px;
+                }
+            }
+        }
+        Clickable {
+            label: root.book.title;
+            clicked => { root.open(); }
+            VerticalLayout {
+                Text { text: root.book.title; font-weight: 500; overflow: elide; color: Theme.ink; }
+                Muted { text: root.book.meta; font-size: 12px; }
+            }
+        }
+        Bar { visible: root.book.progress > 0 && root.book.progress < 1; value: root.book.progress; }
+    }
+}
+
+// covers in rows that wrap to the width; it reports which books are on screen so their covers can be loaded
+export component BookGrid {
+    in property <[BookCard]> books;
+    in property <length> view-top: -1000000px;
+    in property <length> view-height: 2000000px;
+    callback need(int, int);
+    property <int> cols: max(1, floor((self.width + 16px) / 184px));
+    property <length> cell: (self.width - (self.cols - 1) * 16px) / self.cols;
+    property <length> stride: self.cell + 84px;
+    out property <int> first: max(0, floor(self.view-top / self.stride)) * self.cols;
+    out property <int> last: min(self.books.length - 1, ceil((self.view-top + self.view-height) / self.stride) * self.cols + self.cols - 1);
+    min-height: ceil(self.books.length / self.cols) * self.stride;
+    changed first => { root.need(self.first, self.last); }
+    changed last => { root.need(self.first, self.last); }
+    for b[i] in root.books: BookTile {
+        x: mod(i, root.cols) * (root.cell + 16px);
+        y: floor(i / root.cols) * root.stride;
+        width: root.cell;
+        book: b;
+        play => { State.play-book(b.id); }
+        open => { State.open-book(b.id); }
+    }
+}
+
+export component Pill inherits Clickable {
+    in property <string> text;
+    in property <bool> on;
+    label: text;
+    height: 32px;
+    min-width: t.preferred-width + 24px;
+    radius: 16px;
+    accessible-checked: on;
+    Rectangle {
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: root.on ? Theme.ink : Theme.border-strong;
+        background: root.on ? Theme.ink : (root.hover ? Theme.hover : transparent);
+    }
+    t := Text { text: root.text; color: root.on ? Theme.s100 : Theme.ink; font-weight: 500; }
+}
+
+
+export component HomePage {
+    sv := ScrollView {
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: 32px;
+            spacing: 24px;
+            alignment: start;
+            if State.has-hero: Card {
+                HorizontalLayout {
+                    padding: 24px;
+                    spacing: 24px;
+                    Clickable {
+                        label: "Play " + State.hero.title;
+                        width: 184px;
+                        height: 184px;
+                        clicked => { State.play-book(State.hero.id); }
+                        Cover { img: State.hero.cover; title: State.hero.title; tint: State.hero.tint; }
+                    }
+                    VerticalLayout {
+                        spacing: 16px;
+                        alignment: center;
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "In progress"; color: Theme.accent; font-size: 12px; font-weight: 500; }
+                            H1 { text: State.hero.title; }
+                            Muted { text: State.hero.author; }
+                        }
+                        VerticalLayout {
+                            spacing: 8px;
+                            max-width: 520px;
+                            Bar { value: State.hero.progress; thick: 6px; }
+                            HorizontalLayout {
+                                Muted { text: State.hero-listened; font-size: 12px; horizontal-stretch: 1; }
+                                Muted { text: State.hero-left; font-size: 12px; }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: start;
+                            Btn {
+                                primary: true;
+                                text: State.now-id == State.hero.id ? (State.playing ? "Pause" : "Resume") : "Play";
+                                clicked => { State.play-book(State.hero.id); }
+                            }
+                            Btn { text: "Book details"; clicked => { State.open-book(State.hero.id); } }
+                        }
+                    }
+                }
+            }
+            if State.continue-books.length > 0: H2 { text: "Continue listening"; }
+            if State.continue-books.length > 0: BookGrid { books: State.continue-books; }
+            if State.recent-books.length > 0: H2 { text: "Recently added"; }
+            if State.recent-books.length > 0: BookGrid { books: State.recent-books; }
+            if !State.has-hero && State.recent-books.length == 0: Muted { text: State.busy ? "Loading…" : "Nothing here yet"; }
+        }
+    }
+}
+
+export component LibraryPage {
+    sv := ScrollView {
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: 32px;
+            spacing: 24px;
+            alignment: start;
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    alignment: end;
+                    H1 { text: "Library"; }
+                    Muted { text: State.library-count; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: end;
+                    LineEdit {
+                        width: 240px;
+                        placeholder-text: "Search";
+                        text <=> State.query;
+                        edited => { State.refresh-library(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: end;
+                    ComboBox {
+                        width: 180px;
+                        model: ["Title", "Author", "Recently added", "Longest"];
+                        current-index <=> State.sort;
+                        selected => { State.refresh-library(); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                for f[i] in ["All", "In progress", "Not started", "Finished"]: Pill {
+                    text: f;
+                    on: State.filter == i;
+                    clicked => {
+                        State.filter = i;
+                        State.refresh-library();
+                    }
+                }
+            }
+            grid := BookGrid {
+                books: State.library;
+                view-top: -sv.content-y - self.y;
+                view-height: sv.visible-height;
+                need(a, b) => { State.covers-needed("library", a, b); }
+            }
+            if State.library.length == 0: Muted { text: State.busy ? "Loading…" : "No books match"; }
+        }
+    }
+}
+
+export component BookScreen {
+    sv := ScrollView {
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: 32px;
+            spacing: 24px;
+            alignment: start;
+            HorizontalLayout {
+                alignment: start;
+                Link { text: "Back"; icon: Icons.left; clicked => { State.route = State.back-route; } }
+            }
+            if State.book-loading: Muted { text: "Loading…"; }
+            if !State.book-loading: HorizontalLayout {
+                spacing: 32px;
+                alignment: start;
+                VerticalLayout {
+                    alignment: start;
+                    Cover { width: 240px; height: 240px; img: State.book.cover; title: State.book.title; tint: State.book.tint; title-size: 22px; }
+                }
+                VerticalLayout {
+                    spacing: 16px;
+                    max-width: 720px;
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        spacing: 4px;
+                        H1 { text: State.book.title; }
+                        if State.book.subtitle != "": Muted { text: State.book.subtitle; wrap: word-wrap; }
+                        if State.book.by != "": Muted { text: "by " + State.book.by; wrap: word-wrap; }
+                        if State.book.series != "": Muted { text: State.book.series; wrap: word-wrap; }
+                    }
+                    if State.book.finished: Text { text: "Finished"; color: Theme.accent; font-size: 12px; font-weight: 500; }
+                    if !State.book.finished && State.book.progress > 0: VerticalLayout {
+                        spacing: 4px;
+                        max-width: 360px;
+                        Bar { value: State.book.progress; }
+                        Muted { text: State.book.progress-text; font-size: 12px; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: start;
+                        Btn {
+                            primary: true;
+                            text: State.now-id == State.book.id ? (State.playing ? "Pause" : "Resume") : "Play";
+                            clicked => { State.play-book(State.book.id); }
+                        }
+                        Btn {
+                            text: State.book.finished ? "Mark as not finished" : "Mark as finished";
+                            clicked => { State.set-finished(State.book.id, !State.book.finished); }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 8px;
+                        for f in State.book.facts: HorizontalLayout {
+                            spacing: 12px;
+                            Muted { text: f.k; width: 96px; }
+                            Text { text: f.v; color: Theme.ink; wrap: word-wrap; horizontal-stretch: 1; }
+                        }
+                    }
+                    if State.book.description != "": Text { text: State.book.description; color: Theme.ink; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+}
+
+export component SettingsPage {
+    in-out property <string> server;
+    property <string> user;
+    property <string> pass;
+    sv := ScrollView {
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: 32px;
+            spacing: 24px;
+            alignment: start;
+            H1 { text: "Settings"; }
+            VerticalLayout {
+                spacing: 12px;
+                max-width: 640px;
+                H2 { text: "Server connection"; }
+                Card {
+                    if State.signed-in: HorizontalLayout {
+                        padding: 24px;
+                        spacing: 16px;
+                        Text { text: State.signed-in-as; color: Theme.ink; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                        Btn { text: "Sign out"; clicked => { State.sign-out(); } }
+                    }
+                    if !State.signed-in: VerticalLayout {
+                        padding: 24px;
+                        spacing: 12px;
+                        Muted { text: "Sign in to your Audiobookshelf server"; }
+                        LineEdit { placeholder-text: "Server address, e.g. http://192.168.0.10:13378"; text <=> root.server; }
+                        LineEdit { placeholder-text: "Username"; text <=> root.user; }
+                        LineEdit {
+                            placeholder-text: "Password";
+                            input-type: InputType.password;
+                            text <=> root.pass;
+                            accepted => {
+                                State.sign-in(root.server, root.user, root.pass);
+                                root.pass = "";
+                            }
+                        }
+                        HorizontalLayout {
+                            alignment: start;
+                            Btn {
+                                primary: true;
+                                text: State.busy ? "Signing in…" : "Sign in";
+                                enabled: !State.busy;
+                                clicked => {
+                                    State.sign-in(root.server, root.user, root.pass);
+                                    root.pass = "";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 12px;
+                max-width: 640px;
+                H2 { text: "Appearance"; }
+                Card {
+                    HorizontalLayout {
+                        padding: 24px;
+                        spacing: 16px;
+                        Text { text: "Theme"; color: Theme.ink; vertical-alignment: center; horizontal-stretch: 1; }
+                        Btn { small: true; icon: Icons.theme; text: Theme.dark ? "Dark" : "Light"; clicked => { State.toggle-theme(); } }
+                    }
+                }
+            }
+        }
+    }
+}
