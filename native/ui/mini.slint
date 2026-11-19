@@ -1,0 +1,91 @@
+// The mini player that opens from the tray icon: what's playing, the controls, and a way back to the full window.
+// It is its own window, so it has its own copy of the shared globals; Rust fills its properties from the same timer as the main window.
+import { Theme, ThemeSync } from "theme.slint";
+import { Icons, IconBtn, Btn, Bar, Cover, Muted } from "widgets.slint";
+
+export component MiniPlayer inherits Window {
+    title: "Lectern";
+    no-frame: true;
+    always-on-top: true;
+    width: 340px;
+    height: 268px;
+    background: Theme.raised;
+    default-font-family: Theme.sans;
+    default-font-size: 14px;
+
+    in property <bool> has-book;
+    in property <string> book-title;
+    in property <string> chapter;
+    in property <string> author;
+    in property <image> cover;
+    in property <color> tint;
+    in property <bool> playing;
+    in property <float> progress;
+    in property <string> t0;
+    in property <string> t1;
+    in property <bool> has-chapters;
+    in property <int> back-secs: 15;
+    in property <int> fwd-secs: 30;
+    callback toggle();
+    callback skip(float);
+    callback chapter-step(int);
+    callback open-main();
+    callback dismiss();
+
+    ThemeSync {}
+    // a hairline frame, since the window has no border of its own
+    Rectangle { border-width: 1px; border-color: Theme.hairline; }
+    FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Escape {
+                root.dismiss();
+                return accept;
+            }
+            reject
+        }
+    }
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 12px;
+            Cover { width: 64px; height: 64px; img: root.cover; title: ""; tint: root.tint; }
+            VerticalLayout {
+                alignment: center;
+                min-width: 0;
+                horizontal-stretch: 1;
+                Text { text: root.has-book ? root.book-title : "Nothing playing"; font-weight: 500; color: Theme.ink; overflow: elide; }
+                Muted { text: root.chapter; font-size: 12px; }
+                Muted { text: root.author; font-size: 12px; }
+            }
+        }
+        VerticalLayout {
+            spacing: 4px;
+            Bar { value: root.progress; fill: Theme.brand; }
+            HorizontalLayout {
+                Muted { text: root.t0; font-size: 12px; horizontal-stretch: 1; }
+                Muted { text: root.t1; font-size: 12px; }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 4px;
+            IconBtn { icon: Icons.prev; label: "Previous chapter"; enabled: root.has-book && root.has-chapters; clicked => { root.chapter-step(-1); } }
+            IconBtn { icon: Icons.back; label: "Back " + root.back-secs + " seconds"; caption: root.back-secs; enabled: root.has-book; clicked => { root.skip(-root.back-secs); } }
+            IconBtn {
+                main: true;
+                icon: root.playing ? Icons.pause : Icons.play;
+                filled: !root.playing;
+                label: root.playing ? "Pause" : "Play";
+                enabled: root.has-book;
+                clicked => { root.toggle(); }
+            }
+            IconBtn { icon: Icons.fwd; label: "Forward " + root.fwd-secs + " seconds"; caption: root.fwd-secs; enabled: root.has-book; clicked => { root.skip(root.fwd-secs); } }
+            IconBtn { icon: Icons.next; label: "Next chapter"; enabled: root.has-book && root.has-chapters; clicked => { root.chapter-step(1); } }
+        }
+        HorizontalLayout {
+            alignment: center;
+            Btn { small: true; text: "Open Lectern"; clicked => { root.open-main(); } }
+        }
+    }
+}

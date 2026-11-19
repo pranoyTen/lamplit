@@ -1,0 +1,157 @@
+// The main window: the sidebar, the current screen, and the player bar along the bottom.
+import { Theme, ThemeSync } from "theme.slint";
+import { Icons, Icon, Clickable, Btn, Muted } from "widgets.slint";
+import { State, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent } from "state.slint";
+import { HomePage, LibraryPage, BookScreen, SettingsPage, DownloadsPage } from "screens.slint";
+import { SeriesPage, StatsPage } from "pages.slint";
+import { PlayerBar, PlayerPage } from "player.slint";
+import { MiniPlayer } from "mini.slint";
+
+export { State, Theme, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, MiniPlayer }
+
+component NavItem inherits Clickable {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> current;
+    label: text;
+    height: 36px;
+    accessible-item-selected: current;
+    Rectangle { border-radius: 8px; background: root.hover && !root.current ? Theme.hover : transparent; }
+    HorizontalLayout {
+        padding-left: 8px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle { width: 2px; height: 16px; border-radius: 1px; background: root.current ? Theme.brand : transparent; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { d: root.icon; color: root.current ? Theme.brand : Theme.muted; }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.current ? Theme.ink : Theme.muted;
+            font-weight: root.current ? 500 : 400;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Lectern";
+    preferred-width: 1180px;
+    preferred-height: 780px;
+    min-width: 760px;
+    min-height: 560px;
+    background: Theme.s100;
+    default-font-family: Theme.sans;
+    default-font-size: 14px;
+    in-out property <string> server; // the sign-in form's address, filled from the last sign-in
+
+    ThemeSync {}
+    HorizontalLayout {
+        Rectangle {
+            width: 240px;
+            background: Theme.s200;
+            Rectangle { x: parent.width - 1px; width: 1px; background: Theme.hairline; }
+            VerticalLayout {
+                padding-top: 24px;
+                padding-bottom: 24px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 24px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    Text { text: "Lectern"; font-family: Theme.serif; font-weight: 600; font-size: 22px; color: Theme.ink; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    NavItem { text: "Home"; icon: Icons.home; current: State.route == "home"; enabled: State.signed-in; clicked => { State.route = "home"; } }
+                    NavItem { text: "Library"; icon: Icons.library; current: State.route == "library"; enabled: State.signed-in; clicked => { State.route = "library"; } }
+                    NavItem {
+                        text: "Series";
+                        icon: Icons.series;
+                        current: State.route == "series" || State.route == "series-books";
+                        enabled: State.signed-in;
+                        clicked => {
+                            State.route = "series";
+                            State.show-series();
+                        }
+                    }
+                    NavItem { text: "Downloads"; icon: Icons.downloads; current: State.route == "downloads"; clicked => { State.route = "downloads"; } }
+                    NavItem {
+                        text: "Stats";
+                        icon: Icons.stats;
+                        current: State.route == "stats";
+                        enabled: State.signed-in;
+                        clicked => {
+                            State.route = "stats";
+                            State.show-stats();
+                        }
+                    }
+                    NavItem { text: "Settings"; icon: Icons.settings; current: State.route == "settings"; clicked => { State.route = "settings"; } }
+                }
+                Rectangle { vertical-stretch: 1; }
+                VerticalLayout {
+                    spacing: 12px;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    HorizontalLayout {
+                        alignment: start;
+                        Btn { icon: Icons.theme; text: "Theme: " + (Theme.dark ? "Dark" : "Light"); clicked => { State.toggle-theme(); } }
+                    }
+                    if State.offline: Text { text: "Offline: downloaded books still play"; color: Theme.danger; font-size: 12px; wrap: word-wrap; }
+                    Muted { text: State.signed-in ? State.signed-in-as : "Not signed in"; font-size: 12px; wrap: word-wrap; }
+                }
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            if State.message != "": Rectangle {
+                height: msg.preferred-height + 16px;
+                background: Theme.s200;
+                msg := Text { x: 32px; width: parent.width - 64px; text: State.message; color: Theme.ink; wrap: word-wrap; }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.hairline; }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                if State.route == "home": HomePage { width: 100%; height: 100%; }
+                if State.route == "library": LibraryPage { width: 100%; height: 100%; }
+                if State.route == "book": BookScreen { width: 100%; height: 100%; }
+                if State.route == "player": PlayerPage { width: 100%; height: 100%; }
+                if State.route == "downloads": DownloadsPage { width: 100%; height: 100%; }
+                if State.route == "series" || State.route == "series-books": SeriesPage { width: 100%; height: 100%; }
+                if State.route == "stats": StatsPage { width: 100%; height: 100%; }
+                if State.route == "settings": SettingsPage { width: 100%; height: 100%; server <=> root.server; }
+            }
+            if State.has-book && State.route != "player": PlayerBar {
+                open-player => {
+                    if State.route != "player" {
+                        State.back-route = State.route;
+                    }
+                    State.route = "player";
+                }
+            }
+        }
+    }
+}
+
+// The tray icon. Left-click opens the mini player; the menu shows the window, plays or pauses, and quits (closing the window only
+// hides it).
+export component Tray inherits SystemTrayIcon {
+    in property <image> image; // set from Rust as plain pixels: an image embedded for the software renderer cannot become a tray icon
+    icon: root.image;
+    tooltip: "Lectern";
+    in property <bool> has-book;
+    in property <bool> playing;
+    callback show-window();
+    callback show-mini();
+    callback toggle();
+    callback quit();
+    clicked => { root.show-mini(); }
+    Menu {
+        MenuItem { title: "Show Lectern"; activated => { root.show-window(); } }
+        MenuItem { title: root.playing ? "Pause" : "Play"; enabled: root.has-book; activated => { root.toggle(); } }
+        MenuItem { title: "Quit"; activated => { root.quit(); } }
+    }
+}

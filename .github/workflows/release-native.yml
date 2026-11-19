@@ -1,0 +1,113 @@
+# Builds the native (Slint) app's installers and attaches them to a draft GitHub release, signed for the updater with the same key
+# as the Tauri app. Release: push a 2.x version tag, e.g. git tag v2.0.0 && git push origin v2.0.0 (1.x tags still build the Tauri app).
+# Test build of any branch: Actions > Release (native) > Run workflow. The installers then come out as run artifacts, with no release.
+name: Release (native)
+
+on:
+  push:
+    tags: ['v2.*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            formats: nsis
+            chip: x64
+          - os: macos-latest # Apple Silicon
+            formats: app,dmg
+            chip: aarch64
+          - os: macos-13 # Intel
+            formats: app,dmg
+            chip: x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match the version $v in native/Cargo.toml"; exit 1; }
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './native -> target'
+
+      - run: cargo install cargo-packager --version 0.11.8 --locked
+
+      - name: Build and package
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo packager --release --formats ${{ matrix.formats }}
+
+      # each Mac chip has its own build, so its update file is named after the chip (scripts/latest-json.js looks for these names)
+      - name: Name the Mac update file by chip
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          for f in $(find . -name '*.app.tar.gz'); do mv "$f" "./Lectern_${{ matrix.chip }}.app.tar.gz"; done
+          for f in $(find . -name '*.app.tar.gz.sig'); do mv "$f" "./Lectern_${{ matrix.chip }}.app.tar.gz.sig"; done
+          for f in $(find . -name '*.dmg'); do mv "$f" "./Lectern_${{ matrix.chip }}.dmg"; done
+
+      - name: What was built
+        run: find dist -maxdepth 2 -type f | sort
+
+      - name: Attach to the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Lectern ${{ github.ref_name }}
+          body: Download the installer for your system below. The installers are not code-signed, so Windows and macOS will warn the first time you open them.
+          draft: true
+          files: |
+            native/dist/**/*-setup.exe
+            native/dist/**/*-setup.exe.sig
+            native/dist/**/*.app.tar.gz
+            native/dist/**/*.app.tar.gz.sig
+            native/dist/**/*.dmg
+
+      - name: Keep the installers (test builds)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lectern-${{ matrix.os }}
+          path: |
+            native/dist/**/*-setup.exe
+            native/dist/**/*.app.tar.gz
+            native/dist/**/*.dmg
+            native/dist/**/*.sig
+
+  # writes latest.json to the 'updates' branch, which installed copies check (the repo is private, so they read it with a token)
+  updates:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: node scripts/latest-json.js ${{ github.ref_name }} > $RUNNER_TEMP/latest.json
+      - run: |
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git switch --orphan updates
+          cp $RUNNER_TEMP/latest.json latest.json
+          git add latest.json
+          git commit -m 'Update info for ${{ github.ref_name }}'
+          git push --force origin updates

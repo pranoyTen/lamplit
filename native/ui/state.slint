@@ -1,0 +1,207 @@
+// What the screens show and the actions they can ask for. Rust fills the properties and handles the callbacks.
+
+export struct BookCard {
+    id: string,
+    cover-id: string, // the book whose cover shows: the book itself, or a series's first book
+    title: string,
+    author: string,
+    meta: string,      // "Author · 12h 4m"
+    progress: float,   // 0..1; shown as a bar between 0 and 1
+    cover: image,
+    tint: color,
+}
+
+export struct Fact {
+    k: string,
+    v: string,
+}
+
+export struct BookPage {
+    id: string,
+    title: string,
+    subtitle: string,
+    by: string,
+    series: string,
+    progress: float,
+    progress-text: string,
+    finished: bool,
+    description: string,
+    cover: image,
+    tint: color,
+    facts: [Fact],
+}
+
+export struct DlRow {
+    id: string,
+    title: string,
+    author: string,
+    status: string,
+    progress: float,
+    done: bool,
+    failed: bool,
+    cover: image,
+    tint: color,
+}
+
+export struct Tile {
+    label: string,
+    value: string,
+}
+
+export struct BarItem {
+    label: string,
+    value: float, // 0..1 of the tallest
+    text: string,
+    current: bool,
+}
+
+export struct Recent {
+    id: string,
+    title: string,
+    author: string,
+    when: string,
+    cover: image,
+    tint: color,
+}
+
+export struct ListRow {
+    title: string,
+    sub: string,
+    current: bool,
+}
+
+export global State {
+    in-out property <string> route: "home"; // home, library, book, player, settings
+    in-out property <string> back-route: "home";
+    in property <bool> signed-in;
+    in property <string> signed-in-as;
+    in property <bool> busy;
+    in property <string> message;
+
+    // home
+    in property <bool> has-hero;
+    in property <BookCard> hero;
+    in property <string> hero-listened;
+    in property <string> hero-left;
+    in property <[BookCard]> continue-books;
+    in property <[BookCard]> recent-books;
+
+    // library
+    in property <[BookCard]> library;
+    in property <string> library-count;
+    in-out property <string> query;
+    in-out property <int> sort; // 0 title, 1 author, 2 recently added, 3 longest
+    in-out property <int> filter; // 0 all, 1 in progress, 2 not started, 3 finished, 4 downloaded
+
+    // one book
+    in property <BookPage> book;
+    in property <bool> book-loading;
+
+    // now playing
+    in property <bool> has-book;
+    in property <bool> playing;
+    in property <string> now-id;
+    in property <string> now-title;
+    in property <string> now-author;
+    in property <image> now-cover;
+    in property <color> now-tint;
+    in property <string> chapter-text;
+    in property <bool> has-chapters;
+    in property <float> seek-min;
+    in property <float> seek-max;
+    in-out property <float> position;
+    in-out property <bool> seeking;
+    in property <string> pos-text;
+    in property <string> left-text;
+    in property <string> book-left;
+    in property <float> speed: 1;
+    in property <[ListRow]> chapters;
+    in property <[ListRow]> bookmarks;
+    in-out property <int> sleep-index;
+    in property <string> sleep-text;
+    in property <int> back-secs: 15;
+    in property <int> fwd-secs: 30;
+
+    callback open-book(string);
+    callback play-book(string);
+    callback covers-needed(string, int, int); // which list ("library", "home"), first and last index on screen
+    callback refresh-library();
+    callback set-finished(string, bool);
+    callback sign-in(string, string, string);
+    callback sign-out();
+    callback toggle-theme();
+
+    callback toggle();
+    callback skip(float);
+    callback seek(float);
+    callback set-speed(float);
+    callback chapter-step(int);
+    callback pick-chapter(int);
+    callback pick-bookmark(int);
+    callback add-bookmark();
+    callback remove-bookmark(int);
+    callback sleep(int);
+
+    // downloads
+    in property <[DlRow]> downloads;
+    in property <string> dl-summary;
+    in property <bool> dl-paused;
+    in property <bool> dl-any-done;
+    in property <string> book-dl; // the open book's download: "", "queued", "active", "done" or "error"
+    in property <string> book-dl-text;
+    in property <string> dl-folder;
+    in-out property <int> dl-limit-index; // 0 no limit, then 5, 10, 20 and 50 GB
+    in-out property <bool> auto-remove;
+    in property <bool> offline;
+    callback download(string);
+    callback remove-download(string);
+    callback retry-download(string);
+    callback pause-downloads(bool);
+    callback remove-finished();
+    callback choose-folder();
+    callback set-limit(int);
+    callback set-auto-remove(bool);
+
+    // series
+    in property <[BookCard]> series-list;
+    in property <string> series-title;
+    in property <string> series-count;
+    in property <[BookCard]> series-books;
+    in property <bool> series-loading;
+    callback open-series(string);
+    callback show-series();
+
+    // stats
+    in-out property <int> stats-range; // week, month, year
+    in property <bool> stats-loading;
+    in property <string> stats-subtitle;
+    in property <[Tile]> tiles;
+    in property <string> chart-title;
+    in property <[BarItem]> chart;
+    in property <[BarItem]> top-authors;
+    in property <[Recent]> recent-finished;
+    callback show-stats();
+
+    // updates
+    in property <string> version;
+    in-out property <string> gh-token;
+    in property <string> upd-status;
+    in property <bool> upd-busy;
+    in property <string> upd-available; // the newer version, or "" when there is none
+    callback save-token();
+    callback check-updates();
+    callback install-update();
+
+    // playback settings
+    in-out property <int> back-index; // 10, 15 or 30 seconds
+    in-out property <int> fwd-index; // 15, 30 or 60 seconds
+    in-out property <bool> rewind;
+    in-out property <bool> auto-next;
+    in property <[float]> eq; // dB per band: 100 Hz, 300 Hz, 1 kHz, 3 kHz, 8 kHz
+    in-out property <int> eq-preset; // Flat, Voice, Less bass, More bass, Treble, then 5 = Custom
+    callback set-skips(int, int);
+    callback set-rewind(bool);
+    callback set-auto-next(bool);
+    callback set-eq-preset(int);
+    callback set-eq-band(int, float);
+}

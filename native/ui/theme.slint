@@ -1,0 +1,38 @@
+// Lectern's design tokens, the same values as the Tauri app's styles.css: warm neutrals, an amber brand, a teal accent.
+import { Palette } from "std-widgets.slint";
+
+export global Theme {
+    in-out property <bool> dark;
+    // set from Rust per platform: Segoe UI on Windows, the system font elsewhere
+    in-out property <string> sans: "Segoe UI";
+    out property <string> serif: "Georgia";
+
+    out property <color> s100: dark ? #151514 : #f5f4f1;
+    out property <color> s200: dark ? #1c1c1a : #ebe9e5;
+    out property <color> raised: dark ? #252523 : #fcfbf9;
+    out property <color> ink: dark ? #efede8 : #1f1e1b;
+    out property <color> muted: dark ? #aaa79f : #5b5852;
+    out property <color> hairline: dark ? #34332f : #d9d6d0;
+    out property <color> border-strong: #85817a;
+    out property <color> brand: dark ? #e0a951 : #8a5a10;
+    out property <color> on-brand: dark ? #151514 : #fcfbf9;
+    out property <color> accent: dark ? #5fc2bb : #1f6f6b;
+    out property <color> track: dark ? #34332f : #dcd9d3;
+    out property <color> danger: dark ? #f08a73 : #a3321f;
+    out property <color> focus: dark ? #7db4f0 : #1f5fa8;
+    out property <color> hover: #80808024;
+    out property <color> cover-text: #efe6d3;
+}
+
+// keeps the standard widgets (text fields, menus, scroll bars) in the same light or dark scheme
+export component ThemeSync {
+    width: 0;
+    height: 0;
+    property <bool> dark: Theme.dark;
+    init => {
+        Palette.color-scheme = self.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed dark => {
+        Palette.color-scheme = self.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+}

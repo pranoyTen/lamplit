@@ -1,0 +1,304 @@
+// Small building blocks shared by every screen.
+import { Theme } from "theme.slint";
+
+// the line icons from the Tauri app, as SVG path data on a 24 × 24 grid
+export global Icons {
+    out property <string> home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z";
+    out property <string> library: "M4 19.5V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2.5zM4 19.5A2 2 0 0 0 6 21h13";
+    out property <string> settings: "M4 7h10M18 7h2M4 17h2M10 17h10M18 7a2 2 0 1 1-4 0 2 2 0 0 1 4 0M10 17a2 2 0 1 1-4 0 2 2 0 0 1 4 0";
+    out property <string> search: "M18 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0M20 20l-3.5-3.5";
+    out property <string> theme: "M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0M12 4a8 8 0 0 1 0 16z";
+    out property <string> play: "M8 5v14l11-7z";
+    out property <string> pause: "M8 5v14M16 5v14";
+    out property <string> prev: "M6 5v14M19 5 9 12l10 7z";
+    out property <string> next: "M18 5v14M5 5l10 7-10 7z";
+    out property <string> back: "M4 12a8 8 0 1 1 2.5 5.8M4 5v5h5";
+    out property <string> fwd: "M20 12a8 8 0 1 0-2.5 5.8M20 5v5h-5";
+    out property <string> up: "m6 15 6-6 6 6";
+    out property <string> down: "m6 9 6 6 6-6";
+    out property <string> left: "M15 6l-6 6 6 6";
+    out property <string> close: "M6 6l12 12M18 6 6 18";
+    out property <string> downloads: "M12 3v12m0 0-4-4m4 4 4-4M4 20h16";
+    out property <string> series: "M5 5h11a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2zM9 3h10a2 2 0 0 1 2 2v12";
+    out property <string> stats: "M5 20V10M12 20V4M19 20v-7";
+}
+
+export component Icon {
+    in property <string> d;
+    in property <brush> color: Theme.ink;
+    in property <brush> fill: transparent;
+    in property <length> size: 20px;
+    in property <length> stroke: 1.5px;
+    width: size;
+    height: size;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.d;
+        stroke: root.color;
+        stroke-width: root.stroke;
+        fill: root.fill;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+}
+
+// a ring around whatever has keyboard focus
+component FocusRing inherits Rectangle {
+    in property <length> w;
+    in property <length> h;
+    in property <length> radius: 8px;
+    x: -3px;
+    y: -3px;
+    width: root.w + 6px;
+    height: root.h + 6px;
+    border-width: 2px;
+    border-radius: radius + 3px;
+    border-color: Theme.focus;
+}
+
+// a clickable area that also works from the keyboard (Space or Enter) and for screen readers
+export component Clickable {
+    in property <bool> enabled: true;
+    in property <string> label;
+    in property <length> radius: 8px;
+    callback clicked;
+    out property <bool> hover: ta.has-hover;
+    out property <bool> pressed: ta.pressed;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-enabled: enabled;
+    accessible-action-default => {
+        if enabled {
+            root.clicked();
+        }
+    }
+    forward-focus: fs;
+    // the focus scope sits under the touch area and does not take focus on click: on top, or focusing on click, it swallows the
+    // first click; the ring shows only when focus arrives with Tab
+    property <bool> keyboard-focus;
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        focus-gained(reason) => { root.keyboard-focus = reason == FocusReason.tab-navigation; }
+        focus-lost => { root.keyboard-focus = false; }
+        key-pressed(e) => {
+            if e.text == " " || e.text == "\n" {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    @children
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    if root.keyboard-focus: FocusRing { radius: root.radius; w: root.width; h: root.height; }
+}
+
+export component Btn inherits Clickable {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> primary;
+    in property <bool> small;
+    label: text;
+    height: small ? 36px : 44px;
+    min-width: row.preferred-width;
+    max-width: row.preferred-width; // a button keeps its natural width in a row
+    opacity: self.enabled ? 1 : 0.45;
+    Rectangle {
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: primary ? Theme.brand : Theme.border-strong;
+        background: primary ? Theme.brand : (root.hover && root.enabled ? Theme.hover : transparent);
+    }
+    row := HorizontalLayout {
+        padding-left: small ? 12px : 20px;
+        padding-right: self.padding-left;
+        spacing: 8px;
+        alignment: center;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Icon { d: root.icon; color: root.primary ? Theme.on-brand : Theme.ink; }
+        }
+        Text {
+            text: root.text;
+            color: root.primary ? Theme.on-brand : Theme.ink;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// a square icon button; `main` is the round brand-coloured play button
+export component IconBtn inherits Clickable {
+    in property <string> icon;
+    in property <bool> main;
+    in property <bool> filled;
+    in property <length> icon-size: 24px;
+    in property <string> caption; // a small number drawn inside, for the skip buttons
+    width: main ? 52px : 44px;
+    height: self.width;
+    radius: main ? self.width / 2 : 8px;
+    opacity: self.enabled ? 1 : 0.45;
+    Rectangle {
+        border-radius: root.radius;
+        background: root.main ? Theme.brand : (root.hover && root.enabled ? Theme.hover : transparent);
+    }
+    Icon {
+        d: root.icon;
+        size: root.icon-size;
+        color: root.main ? Theme.on-brand : Theme.ink;
+        fill: root.filled ? (root.main ? Theme.on-brand : Theme.ink) : transparent;
+        stroke: root.main && root.icon == Icons.pause ? 2.5px : 1.5px;
+    }
+    if root.caption != "": Text {
+        text: root.caption;
+        font-size: 8px;
+        font-weight: 600;
+        color: Theme.ink;
+        y: (parent.height - self.height) / 2 + 2px;
+    }
+}
+
+// a text link in the muted colour, like the Tauri app's "Back" and library names
+export component Link inherits Clickable {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> current;
+    label: text;
+    height: 32px;
+    min-width: row.preferred-width;
+    row := HorizontalLayout {
+        spacing: 4px;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Icon { d: root.icon; size: 16px; color: root.hover ? Theme.ink : Theme.muted; }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.current || root.hover ? Theme.ink : Theme.muted;
+            font-weight: root.current ? 500 : 400;
+        }
+    }
+}
+
+export component Bar {
+    in property <float> value;
+    in property <length> thick: 4px;
+    in property <color> fill: Theme.accent;
+    height: thick;
+    Rectangle {
+        border-radius: root.thick / 2;
+        background: Theme.track;
+        clip: true;
+        Rectangle {
+            x: 0;
+            width: parent.width * clamp(root.value, 0, 1);
+            background: root.fill;
+        }
+    }
+}
+
+export component Card inherits Rectangle {
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.hairline;
+    border-radius: 12px;
+    drop-shadow-blur: 2px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: Theme.dark ? #00000080 : #0000001a;
+}
+
+// a square cover: the title in serif on a colour drawn from it, under the real cover once it has loaded
+export component Cover {
+    in property <image> img;
+    in property <string> title;
+    in property <color> tint: #4a3f35;
+    in property <length> title-size: 18px;
+    in property <length> radius: 4px;
+    Rectangle {
+        border-radius: root.radius;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: #0000001a;
+        background: root.tint;
+    }
+    Rectangle {
+        border-radius: root.radius;
+        clip: true;
+        Text {
+            x: 16px;
+            width: parent.width - 32px;
+            y: parent.height - self.height - 16px;
+            text: root.title;
+            color: Theme.cover-text;
+            font-family: Theme.serif;
+            font-weight: 600;
+            font-size: root.title-size;
+            wrap: word-wrap;
+            overflow: elide;
+        }
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.img;
+            image-fit: cover;
+        }
+    }
+}
+
+export component H1 inherits Text {
+    font-family: Theme.serif;
+    font-weight: 600;
+    font-size: 32px;
+    color: Theme.ink;
+    wrap: word-wrap;
+}
+
+export component H2 inherits Text {
+    font-family: Theme.serif;
+    font-weight: 600;
+    font-size: 22px;
+    color: Theme.ink;
+}
+
+export component Muted inherits Text {
+    color: Theme.muted;
+    overflow: elide;
+}
+
+// an on/off switch in the app's colours (the standard one always takes the Windows accent colour)
+export component Toggle inherits Clickable {
+    in-out property <bool> checked;
+    callback toggled;
+    width: 44px;
+    height: 24px;
+    radius: 12px;
+    accessible-role: switch;
+    accessible-checked: checked;
+    clicked => {
+        root.checked = !root.checked;
+        root.toggled();
+    }
+    Rectangle {
+        border-radius: 12px;
+        background: root.checked ? Theme.brand : Theme.track;
+        animate background { duration: 120ms; }
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            y: 3px;
+            x: root.checked ? parent.width - self.width - 3px : 3px;
+            animate x { duration: 120ms; }
+            background: root.checked ? Theme.on-brand : Theme.raised;
+        }
+    }
+}
