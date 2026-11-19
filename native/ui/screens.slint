@@ -1,18 +1,19 @@
 // Home, Library, one book, and Settings.
-import { ScrollView, LineEdit, ComboBox, Switch, Slider } from "std-widgets.slint";
+import { ScrollView, LineEdit, ComboBox, Slider } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Icons, Icon, Clickable, Btn, Link, Bar, Card, Cover, H1, H2, Muted } from "widgets.slint";
+import { Icons, Icon, Clickable, Btn, Link, Bar, Card, Cover, H1, H2, Muted, Toggle } from "widgets.slint";
 import { State, BookCard, DlRow } from "state.slint";
 
 // a cover that plays the book, its title and author that open it, and a progress bar once started
 component BookTile {
     in property <BookCard> book;
+    in property <bool> series;
     callback play();
     callback open();
     VerticalLayout {
         spacing: 8px;
         cover := Clickable {
-            label: "Play " + root.book.title;
+            label: (root.series ? "Open " : "Play ") + root.book.title;
             height: self.width;
             radius: 4px;
             clicked => { root.play(); }
@@ -20,7 +21,7 @@ component BookTile {
             Rectangle {
                 border-radius: 4px;
                 background: #00000073;
-                opacity: cover.hover ? 1 : 0;
+                opacity: cover.hover && !root.series ? 1 : 0;
                 animate opacity { duration: 150ms; }
                 Icon {
                     d: State.playing && State.now-id == root.book.id ? Icons.pause : Icons.play;
@@ -46,6 +47,7 @@ component BookTile {
 // covers in rows that wrap to the width; it reports which books are on screen so their covers can be loaded
 export component BookGrid {
     in property <[BookCard]> books;
+    in property <bool> series; // the cards are series: both the cover and the name open the series
     in property <length> view-top: -1000000px;
     in property <length> view-height: 2000000px;
     callback need(int, int);
@@ -62,8 +64,13 @@ export component BookGrid {
         y: floor(i / root.cols) * root.stride;
         width: root.cell;
         book: b;
-        play => { State.play-book(b.id); }
-        open => { State.open-book(b.id); }
+        series: root.series;
+        play => {
+            if root.series { State.open-series(b.id); } else { State.play-book(b.id); }
+        }
+        open => {
+            if root.series { State.open-series(b.id); } else { State.open-book(b.id); }
+        }
     }
 }
 
@@ -384,7 +391,7 @@ export component SettingsPage {
                                 Text { text: "Rewind a little after a long pause"; color: Theme.ink; wrap: word-wrap; }
                                 Muted { text: "Goes back 10 seconds when you resume after more than a minute"; font-size: 12px; wrap: word-wrap; }
                             }
-                            Switch { checked <=> State.rewind; toggled => { State.set-rewind(self.checked); } }
+                            Toggle { checked <=> State.rewind; toggled => { State.set-rewind(self.checked); } }
                         }
                         HorizontalLayout {
                             spacing: 16px;
@@ -393,7 +400,7 @@ export component SettingsPage {
                                 Text { text: "Play the next chapter automatically"; color: Theme.ink; wrap: word-wrap; }
                                 Muted { text: "When off, playback stops at the end of each chapter"; font-size: 12px; wrap: word-wrap; }
                             }
-                            Switch { checked <=> State.auto-next; toggled => { State.set-auto-next(self.checked); } }
+                            Toggle { checked <=> State.auto-next; toggled => { State.set-auto-next(self.checked); } }
                         }
                     }
                 }
@@ -479,7 +486,7 @@ export component SettingsPage {
                                 Text { text: "Remove downloads when a book is finished"; color: Theme.ink; wrap: word-wrap; }
                                 Muted { text: "Frees space automatically. Finished books stay in your library"; font-size: 12px; wrap: word-wrap; }
                             }
-                            Switch {
+                            Toggle {
                                 checked <=> State.auto-remove;
                                 toggled => { State.set-auto-remove(self.checked); }
                             }

@@ -19,6 +19,8 @@ export global Icons {
     out property <string> left: "M15 6l-6 6 6 6";
     out property <string> close: "M6 6l12 12M18 6 6 18";
     out property <string> downloads: "M12 3v12m0 0-4-4m4 4 4-4M4 20h16";
+    out property <string> series: "M5 5h11a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2zM9 3h10a2 2 0 0 1 2 2v12";
+    out property <string> stats: "M5 20V10M12 20V4M19 20v-7";
 }
 
 export component Icon {
@@ -270,4 +272,33 @@ export component H2 inherits Text {
 export component Muted inherits Text {
     color: Theme.muted;
     overflow: elide;
+}
+
+// an on/off switch in the app's colours (the standard one always takes the Windows accent colour)
+export component Toggle inherits Clickable {
+    in-out property <bool> checked;
+    callback toggled;
+    width: 44px;
+    height: 24px;
+    radius: 12px;
+    accessible-role: switch;
+    accessible-checked: checked;
+    clicked => {
+        root.checked = !root.checked;
+        root.toggled();
+    }
+    Rectangle {
+        border-radius: 12px;
+        background: root.checked ? Theme.brand : Theme.track;
+        animate background { duration: 120ms; }
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            y: 3px;
+            x: root.checked ? parent.width - self.width - 3px : 3px;
+            animate x { duration: 120ms; }
+            background: root.checked ? Theme.on-brand : Theme.raised;
+        }
+    }
 }

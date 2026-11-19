@@ -10,6 +10,7 @@ mod http_source;
 mod library;
 mod media;
 mod player;
+mod stats;
 mod stretch;
 
 use api::{Book, Client, Details};
@@ -55,6 +56,11 @@ struct App {
     library: Rc<VecModel<BookCard>>,
     continuing: Rc<VecModel<BookCard>>,
     recent: Rc<VecModel<BookCard>>,
+    series: Vec<api::Series>,
+    series_model: Rc<VecModel<BookCard>>,
+    series_books: Rc<VecModel<BookCard>>,
+    finished_model: Rc<VecModel<Recent>>,
+    listening: Option<(Instant, api::Listening)>, // the stats, and when they were fetched
     covers: Covers,
     playing: Option<Playing>,
     speed: f64,
@@ -235,6 +241,7 @@ fn tint(title: &str) -> Color {
 fn card(a: &mut App, b: &Book) -> BookCard {
     BookCard {
         id: b.id.clone().into(),
+        cover_id: b.id.clone().into(),
         title: b.title.clone().into(),
         author: b.author.clone().into(),
         meta: if b.duration > 0.0 { format!("{} · {}", b.author, library::length(b.duration)) } else { b.author.clone() }.into(),
@@ -259,17 +266,23 @@ fn cover_arrived(id: String, px: Option<slint::SharedPixelBuffer<slint::Rgba8Pix
     let evicted = with_app(|a| a.covers.insert(id.clone(), img.clone()));
     let set = |model: &VecModel<BookCard>, id: &str, img: &Image| {
         for i in 0..model.row_count() {
-            if let Some(mut r) = model.row_data(i).filter(|r| r.id == id) {
+            if let Some(mut r) = model.row_data(i).filter(|r| r.cover_id == id) {
                 r.cover = img.clone();
                 model.set_row_data(i, r);
             }
         }
     };
     with_app(|a| {
-        for m in [&a.library, &a.continuing, &a.recent] {
+        for m in [&a.library, &a.continuing, &a.recent, &a.series_model, &a.series_books] {
             set(m, &id, &img);
             for old in &evicted {
                 set(m, old, &Image::default());
+            }
+        }
+        for i in 0..a.finished_model.row_count() {
+            if let Some(mut r) = a.finished_model.row_data(i).filter(|r| r.id == id) {
+                r.cover = img.clone();
+                a.finished_model.set_row_data(i, r);
             }
         }
     });
@@ -291,13 +304,166 @@ fn cover_arrived(id: String, px: Option<slint::SharedPixelBuffer<slint::Rgba8Pix
 }
 
 fn covers_needed(list: &str, first: i32, last: i32) {
-    if list != "library" || first < 0 {
+    if first < 0 {
         return;
     }
-    let ids: Vec<String> = with_app(|a| (first..=last).filter_map(|i| a.library.row_data(i as usize)).map(|r| r.id.to_string()).collect());
+    let ids: Vec<String> = with_app(|a| {
+        let model = if list == "series" { &a.series_model } else { &a.library };
+        (first..=last).filter_map(|i| model.row_data(i as usize)).map(|r| r.cover_id.to_string()).filter(|id| !id.is_empty()).collect()
+    });
     for id in ids.iter().rev() {
         want_cover(id); // newest request is served first, so the top of the screen is asked for last
     }
+}
+
+// ---- series ----
+fn show_series() {
+    if with_app(|a| !a.series.is_empty()) {
+        return fill_series();
+    }
+    let Some(client) = with_app(|a| a.client.clone()) else { return };
+    if let Some(ui) = window() {
+        ui.global::<State>().set_series_loading(true);
+    }
+    background(move || client.series(), |r| {
+        if let Some(ui) = window() {
+            ui.global::<State>().set_series_loading(false);
+        }
+        match r {
+            Ok(s) => {
+                with_app(|a| a.series = s);
+                fill_series();
+            }
+            Err(e) => say(e),
+        }
+    });
+}
+
+fn fill_series() {
+    with_app(|a| {
+        let rows: Vec<BookCard> = a.series.iter()
+            .map(|s| BookCard {
+                id: s.id.clone().into(),
+                cover_id: s.books.first().map(|b| b.id.clone()).unwrap_or_default().into(),
+                title: s.name.clone().into(),
+                author: SharedString::new(),
+                meta: format!("{} {}", s.books.len(), if s.books.len() == 1 { "book" } else { "books" }).into(),
+                progress: 0.0,
+                cover: s.books.first().and_then(|b| a.covers.get(&b.id)).unwrap_or_default(),
+                tint: tint(&s.name),
+            })
+            .collect();
+        a.series_model.set_vec(rows);
+    });
+    covers_needed("series", 0, 23);
+}
+
+fn open_series(id: String) {
+    let Some(ui) = window() else { return };
+    let st = ui.global::<State>();
+    let Some(s) = with_app(|a| a.series.iter().find(|s| s.id == id).cloned()) else { return };
+    st.set_series_title(s.name.clone().into());
+    st.set_series_count(format!("{} {}", s.books.len(), if s.books.len() == 1 { "book" } else { "books" }).into());
+    with_app(|a| {
+        let rows: Vec<BookCard> = s.books.iter().map(|b| card(a, b)).collect();
+        a.series_books.set_vec(rows);
+    });
+    for b in s.books.iter().rev() {
+        want_cover(&b.id);
+    }
+    st.set_route("series-books".into());
+}
+
+// ---- stats ----
+fn hours(secs: f64) -> String {
+    if secs >= 36000.0 { format!("{}h", (secs / 3600.0).round()) } else { library::length(secs) }
+}
+
+/// Fetches the listening stats (at most once a minute) and fills the Stats page for the chosen range.
+fn show_stats() {
+    let fresh = with_app(|a| a.listening.as_ref().is_some_and(|(t, _)| t.elapsed() < Duration::from_secs(60)));
+    if fresh {
+        return fill_stats();
+    }
+    let Some(client) = with_app(|a| a.client.clone()) else { return };
+    if let Some(ui) = window() {
+        ui.global::<State>().set_stats_loading(true);
+    }
+    background(move || client.listening(), |r| {
+        if let Some(ui) = window() {
+            ui.global::<State>().set_stats_loading(false);
+        }
+        match r {
+            Ok(l) => {
+                with_app(|a| a.listening = Some((Instant::now(), l)));
+                fill_stats();
+            }
+            Err(e) => say(e),
+        }
+    });
+}
+
+fn fill_stats() {
+    use chrono::TimeZone;
+    let Some(ui) = window() else { return };
+    let st = ui.global::<State>();
+    let Some(l) = with_app(|a| a.listening.as_ref().map(|(_, l)| l.clone())) else { return };
+    let range = [stats::Range::Week, stats::Range::Month, stats::Range::Year][st.get_stats_range().clamp(0, 2) as usize];
+    let now = chrono::Local::now();
+    let local_day = |ms: f64| chrono::Local.timestamp_millis_opt(ms as i64).single().map(|t| t.date_naive());
+    let authors: Vec<(String, f64)> = l.items.iter().map(|i| (i.author.clone(), i.secs)).collect();
+    let finished: Vec<chrono::NaiveDate> = l.finished.iter().filter_map(|(_, at)| local_day(*at)).collect();
+    let s = stats::summarize(&l.days, &authors, &finished, range, now.date_naive());
+
+    st.set_stats_subtitle(match range {
+        stats::Range::Week => "Listening over the last 7 days".to_string(),
+        stats::Range::Month => "Listening so far this month".to_string(),
+        stats::Range::Year => format!("Listening so far in {}", chrono::Datelike::year(&now)),
+    }.into());
+    let tiles = vec![
+        Tile { label: "Time listened".into(), value: hours(s.time).into() },
+        Tile { label: "Books finished".into(), value: s.finished.to_string().into() },
+        Tile { label: "Daily average".into(), value: library::length(s.avg).into() },
+        Tile { label: "Current streak".into(), value: format!("{} {}", s.streak, if s.streak == 1 { "day" } else { "days" }).into() },
+    ];
+    st.set_tiles(ModelRc::new(VecModel::from(tiles)));
+    let year = range == stats::Range::Year;
+    st.set_chart_title(if year { "Hours listened per month" } else { "Minutes listened per day" }.into());
+    let max = s.bars.iter().map(|b| b.1).fold(1.0, f64::max);
+    let n = s.bars.len();
+    let bars: Vec<BarItem> = s.bars.iter().enumerate()
+        .map(|(i, (label, secs))| BarItem {
+            label: label.clone().into(),
+            value: (secs / max) as f32,
+            text: if year { format!("{}h", (secs / 3600.0).round()) } else { format!("{}m", (secs / 60.0).round()) }.into(),
+            current: i + 1 == n,
+        })
+        .collect();
+    st.set_chart(ModelRc::new(VecModel::from(bars)));
+    let top = s.authors.first().map_or(1.0, |a| a.1.max(1.0));
+    let authors: Vec<BarItem> = s.authors.iter()
+        .map(|(name, secs)| BarItem { label: name.clone().into(), value: (secs / top) as f32, text: hours(*secs).into(), current: false })
+        .collect();
+    st.set_top_authors(ModelRc::new(VecModel::from(authors)));
+
+    // the five most recently finished books, named from the stats or the library
+    let mut done = l.finished.clone();
+    done.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let recent: Vec<Recent> = with_app(|a| {
+        done.iter()
+            .filter_map(|(id, at)| {
+                let (title, author) = l.items.iter().find(|i| &i.id == id).map(|i| (i.title.clone(), i.author.clone()))
+                    .or_else(|| find_book(a, id).map(|b| (b.title, b.author)))?;
+                let when = local_day(*at).map(|d| d.format("%b %-d").to_string()).unwrap_or_default();
+                Some(Recent { id: id.clone().into(), cover: a.covers.get(id).unwrap_or_default(), tint: tint(&title), title: title.into(), author: author.into(), when: when.into() })
+            })
+            .take(5)
+            .collect()
+    });
+    for r in &recent {
+        want_cover(&r.id);
+    }
+    with_app(|a| a.finished_model.set_vec(recent));
 }
 
 fn refresh_library() {
@@ -882,6 +1048,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
     let (library, continuing, recent) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
+    let (series_model, series_books, finished_model) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
     let gains = Arc::new(eq::Gains::default());
     gains.set(prefs.eq);
     let eq_model = Rc::new(VecModel::from(prefs.eq.to_vec()));
@@ -889,6 +1056,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         *a.borrow_mut() = Some(App {
             ui: ui.as_weak(), _sink: sink, out, client: None, books: vec![], in_progress: vec![], progress: HashMap::new(),
             library: library.clone(), continuing: continuing.clone(), recent: recent.clone(), covers, playing: None, speed: prefs.speed,
+            series: vec![], series_model: series_model.clone(), series_books: series_books.clone(), finished_model: finished_model.clone(), listening: None,
             media: None, shown: (None, Instant::now()), dl, downloaded: HashSet::new(), prefs: prefs.clone(),
             places: load_json("places.json").unwrap_or_default(), gains: gains.clone(), eq_model: eq_model.clone(), paused_at: None,
         })
@@ -903,6 +1071,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.set_library(library.into());
     st.set_continue_books(continuing.into());
     st.set_recent_books(recent.into());
+    st.set_series_list(series_model.into());
+    st.set_series_books(series_books.into());
+    st.set_recent_finished(finished_model.into());
     st.set_speed(prefs.speed as f32);
     st.set_dl_limit_index(LIMITS_GB.iter().position(|g| *g == prefs.limit_gb).unwrap_or(2) as i32);
     st.set_auto_remove(prefs.auto_remove);
@@ -1013,6 +1184,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.on_open_book(|id| open_book(id.to_string()));
     st.on_play_book(|id| play_book(id.to_string()));
     st.on_set_finished(|id, f| set_finished(id.to_string(), f));
+    st.on_show_series(show_series);
+    st.on_open_series(|id| open_series(id.to_string()));
+    st.on_show_stats(show_stats);
 
     st.on_toggle(toggle);
     st.on_skip(|d| skip(d as f64));

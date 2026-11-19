@@ -2,6 +2,7 @@
 
 export struct BookCard {
     id: string,
+    cover-id: string, // the book whose cover shows: the book itself, or a series's first book
     title: string,
     author: string,
     meta: string,      // "Author · 12h 4m"
@@ -38,6 +39,27 @@ export struct DlRow {
     progress: float,
     done: bool,
     failed: bool,
+    cover: image,
+    tint: color,
+}
+
+export struct Tile {
+    label: string,
+    value: string,
+}
+
+export struct BarItem {
+    label: string,
+    value: float, // 0..1 of the tallest
+    text: string,
+    current: bool,
+}
+
+export struct Recent {
+    id: string,
+    title: string,
+    author: string,
+    when: string,
     cover: image,
     tint: color,
 }
@@ -139,6 +161,26 @@ export global State {
     callback choose-folder();
     callback set-limit(int);
     callback set-auto-remove(bool);
+
+    // series
+    in property <[BookCard]> series-list;
+    in property <string> series-title;
+    in property <string> series-count;
+    in property <[BookCard]> series-books;
+    in property <bool> series-loading;
+    callback open-series(string);
+    callback show-series();
+
+    // stats
+    in-out property <int> stats-range; // week, month, year
+    in property <bool> stats-loading;
+    in property <string> stats-subtitle;
+    in property <[Tile]> tiles;
+    in property <string> chart-title;
+    in property <[BarItem]> chart;
+    in property <[BarItem]> top-authors;
+    in property <[Recent]> recent-finished;
+    callback show-stats();
 
     // playback settings
     in-out property <int> back-index; // 10, 15 or 30 seconds

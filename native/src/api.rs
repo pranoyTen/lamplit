@@ -18,6 +18,28 @@ pub struct Book {
     pub added: f64,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Series {
+    pub id: String,
+    pub name: String,
+    pub books: Vec<Book>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Listened {
+    pub id: String,
+    pub title: String,
+    pub author: String,
+    pub secs: f64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Listening {
+    pub days: std::collections::HashMap<String, f64>,
+    pub items: Vec<Listened>,
+    pub finished: Vec<(String, f64)>, // book id and when, in milliseconds since 1970
+}
+
 /// Everything the book screen shows.
 #[derive(Clone, Debug, Default)]
 pub struct Details {
@@ -148,13 +170,53 @@ impl Client {
     /// The first page of books in every book library.
     // shortcut: first 100 books per library, no paging; add paging with the real library screen
     pub fn books(&self) -> Result<Vec<Book>, String> {
-        let libs = self.call(reqwest::Method::GET, "/api/libraries", None)?;
         let mut out = vec![];
-        for l in libs["libraries"].as_array().into_iter().flatten().filter(|l| l["mediaType"] != "podcast") {
-            let r = self.call(reqwest::Method::GET, &format!("/api/libraries/{}/items?limit=100&sort=media.metadata.title", s(&l["id"])), None)?;
+        for lib in self.book_libraries()? {
+            let r = self.call(reqwest::Method::GET, &format!("/api/libraries/{lib}/items?limit=100&sort=media.metadata.title"), None)?;
             out.extend(r["results"].as_array().into_iter().flatten().map(book_of));
         }
         Ok(out)
+    }
+
+    fn book_libraries(&self) -> Result<Vec<String>, String> {
+        let libs = self.call(reqwest::Method::GET, "/api/libraries", None)?;
+        Ok(libs["libraries"].as_array().into_iter().flatten().filter(|l| l["mediaType"] != "podcast").map(|l| s(&l["id"])).collect())
+    }
+
+    /// Every series in the book libraries, each with its books in reading order.
+    pub fn series(&self) -> Result<Vec<Series>, String> {
+        let mut out = vec![];
+        for lib in self.book_libraries()? {
+            let r = self.call(reqwest::Method::GET, &format!("/api/libraries/{lib}/series?limit=200&sort=name"), None)?;
+            out.extend(r["results"].as_array().into_iter().flatten().map(|x| Series {
+                id: s(&x["id"]),
+                name: s(&x["name"]),
+                books: x["books"].as_array().into_iter().flatten().map(book_of).collect(),
+            }));
+        }
+        Ok(out)
+    }
+
+    /// Listening time per day and per book, and when books were finished.
+    pub fn listening(&self) -> Result<Listening, String> {
+        let st = self.call(reqwest::Method::GET, "/api/me/listening-stats", None)?;
+        let me = self.call(reqwest::Method::GET, "/api/me", None)?;
+        let days = st["days"].as_object().into_iter().flatten().map(|(k, v)| (k.clone(), v.as_f64().unwrap_or(0.0))).collect();
+        let items = st["items"].as_object().into_iter().flatten()
+            .map(|(_, i)| {
+                let md = &i["mediaMetadata"];
+                let author = md["authorName"].as_str().map(str::to_string)
+                    .or_else(|| md["authors"][0]["name"].as_str().map(str::to_string))
+                    .or_else(|| md["author"].as_str().map(str::to_string))
+                    .unwrap_or_default();
+                Listened { id: s(&i["id"]), title: s(&md["title"]), author, secs: i["timeListening"].as_f64().or(i["timeListened"].as_f64()).unwrap_or(0.0) }
+            })
+            .collect();
+        let finished = me["mediaProgress"].as_array().into_iter().flatten()
+            .filter(|p| p["isFinished"].as_bool() == Some(true))
+            .map(|p| (s(&p["libraryItemId"]), p["finishedAt"].as_f64().or(p["lastUpdate"].as_f64()).unwrap_or(0.0)))
+            .collect();
+        Ok(Listening { days, items, finished })
     }
 
     /// How far the user is in each book: 0..1, and 1 for finished.
