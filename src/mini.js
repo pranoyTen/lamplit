@@ -26,7 +26,7 @@ function paint(p) {
 
 $('ctl').onclick = e => { const k = e.target.closest('[data-k]')?.dataset.k; if (k) T.event.emit('taskbar', k); };
 $('open').onclick = () => T.core.invoke('show_main');
-document.onkeydown = e => { if (e.key === 'Escape') T.window.getCurrentWindow().hide(); };
+document.onkeydown = e => { if (e.key === 'Escape') T.window.getCurrentWindow().destroy(); };
 paint({ has: false });
 T.event.listen('mini-state', e => paint(e.payload));
 // ask the main window for the current state when this one opens or is shown again

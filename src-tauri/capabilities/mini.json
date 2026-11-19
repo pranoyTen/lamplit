@@ -2,5 +2,5 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "mini",
   "windows": ["mini"],
-  "permissions": ["core:default", "core:window:allow-hide"]
+  "permissions": ["core:default", "core:window:allow-destroy"]
 }
