@@ -1,0 +1,87 @@
+// A bare window to prove the playback core: sign in, pick a book, play it. The real screens come later.
+import { Button, LineEdit, Slider, StandardListView, ComboBox, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "Lectern";
+    preferred-width: 720px;
+    preferred-height: 560px;
+
+    in property <bool> signed-in;
+    in-out property <string> server;
+    in-out property <string> username;
+    in-out property <string> password;
+    in property <bool> busy;
+    in property <string> message;
+    in property <[StandardListViewItem]> books;
+    in property <string> now-title;
+    in property <bool> has-book;
+    in property <bool> playing;
+    in property <float> duration;
+    in-out property <float> position;
+    in property <string> pos-text;
+    in property <string> left-text;
+    in-out property <bool> seeking; // the listener is dragging the bar, so the timer leaves it alone
+
+    callback sign-in();
+    callback sign-out();
+    callback pick(int);
+    callback toggle();
+    callback skip(float);
+    callback seek(float);
+    callback speed(string);
+
+    VerticalBox {
+        if !root.signed-in: VerticalBox {
+            alignment: start;
+            Text { text: "Sign in to your Audiobookshelf server"; font-size: 18px; }
+            LineEdit { placeholder-text: "Server address, e.g. http://192.168.0.10:13378"; text <=> root.server; }
+            LineEdit { placeholder-text: "Username"; text <=> root.username; }
+            LineEdit { placeholder-text: "Password"; input-type: InputType.password; text <=> root.password; accepted => { root.sign-in(); } }
+            Button { text: "Sign in"; primary: true; enabled: !root.busy; clicked => { root.sign-in(); } }
+        }
+        if root.signed-in: HorizontalBox {
+            padding: 0;
+            Text { text: "Books"; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
+            Button { text: "Sign out"; clicked => { root.sign-out(); } }
+        }
+        if root.signed-in: StandardListView {
+            vertical-stretch: 1;
+            model: root.books;
+            current-item-changed(i) => { root.pick(i); }
+        }
+        if root.message != "": Text { text: root.message; wrap: word-wrap; }
+        VerticalBox {
+            visible: root.has-book;
+            height: root.has-book ? self.preferred-height : 0;
+            padding: 0;
+            Text { text: root.now-title; font-size: 16px; overflow: elide; }
+            Slider {
+                minimum: 0;
+                maximum: max(root.duration, 1);
+                value <=> root.position;
+                changed => { root.seeking = true; }
+                released(v) => {
+                    root.seeking = false;
+                    root.seek(v);
+                }
+            }
+            HorizontalBox {
+                padding: 0;
+                Text { text: root.pos-text; horizontal-stretch: 1; }
+                Text { text: root.left-text; }
+            }
+            HorizontalBox {
+                padding: 0;
+                alignment: center;
+                Button { text: "Back 15"; clicked => { root.skip(-15); } }
+                Button { text: root.playing ? "Pause" : "Play"; primary: true; clicked => { root.toggle(); } }
+                Button { text: "Forward 30"; clicked => { root.skip(30); } }
+                ComboBox {
+                    model: ["0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"];
+                    current-index: 1;
+                    selected(v) => { root.speed(v); }
+                }
+            }
+        }
+    }
+}
