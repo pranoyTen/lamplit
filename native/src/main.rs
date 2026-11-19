@@ -769,6 +769,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    ui.show()?;
+    covers::set_scale(ui.window().scale_factor()); // known once the window is on a screen, and needed before the first cover
     match load_session() {
         Some(c) => {
             ui.set_server(c.base.clone().into());
@@ -776,7 +778,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => st.set_route("settings".into()),
     }
-    ui.show()?;
     // media keys need the window's handle, which exists once it is shown
     let controls = media::register(ui.window(), |e| {
         let _ = slint::invoke_from_event_loop(move || media_event(e));

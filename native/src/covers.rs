@@ -2,11 +2,25 @@
 // Requests are served newest first, so after a fast scroll the covers now on screen come before the ones scrolled past.
 use crate::api::Client;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 use std::sync::{Arc, Condvar, Mutex};
 
-pub const SIZE: u32 = 240; // pixels: sharp in a 168 px grid cell at 125-150% display scaling
-const KEEP: usize = 150; // about 35 MB of decoded covers at most
+// covers are decoded at the size the screen draws them, so they are never stretched (which blurs them): the largest cover in a grid,
+// on the book page and on the player is about 280 points, times the display scaling
+static SIZE: AtomicU32 = AtomicU32::new(420);
+const BUDGET: usize = 32 * 1024 * 1024; // decoded covers kept in memory, in bytes
 const WORKERS: usize = 3;
+
+/// Sets the cover size for a display scaling factor (1.5 at 150%). Call before covers are asked for.
+pub fn set_scale(scale: f32) {
+    SIZE.store(((280.0 * scale.clamp(1.0, 3.0)) as u32).div_ceil(20) * 20, Relaxed);
+}
+
+/// How many covers fit in the memory budget at the current size.
+fn keep() -> usize {
+    let s = SIZE.load(Relaxed) as usize;
+    (BUDGET / (s * s * 4)).max(24)
+}
 
 type Job = (Client, String);
 type Done = Box<dyn Fn(String, Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>) + Send + Sync>;
@@ -31,7 +45,7 @@ impl Covers {
                     let mut jobs = cv.wait_while(lock.lock().unwrap(), |j| j.is_empty()).unwrap();
                     jobs.pop().unwrap()
                 };
-                let px = client.cover(&id, SIZE).ok().map(|img| {
+                let px = client.cover(&id, SIZE.load(Relaxed)).ok().map(|img| {
                     let (w, h) = img.dimensions();
                     slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(img.as_raw(), w, h)
                 });
@@ -75,7 +89,7 @@ impl Covers {
         self.cache.insert(id.clone(), img);
         self.touch(&id);
         let mut evicted = vec![];
-        while self.order.len() > KEEP {
+        while self.order.len() > keep() {
             if let Some(old) = self.order.pop_front() {
                 self.cache.remove(&old);
                 evicted.push(old);
