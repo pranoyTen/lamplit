@@ -16,8 +16,18 @@ pub fn check(token: &str) -> Result<Option<Update>, String> {
     if token.is_empty() {
         return Err("Add a GitHub token below first".into());
     }
-    let config = Config { endpoints: vec![Url::parse(ENDPOINT).unwrap()], pubkey: PUBKEY.trim().into(), windows: None };
     let version = Version::parse(current()).map_err(|e| e.to_string())?;
+    // read the version first: an update file from an older release (a 1.x one from the Tauri app has no `format` fields, which the
+    // updater requires) just means there is nothing newer, not an error
+    let res = reqwest::blocking::Client::new().get(ENDPOINT).bearer_auth(token).send().map_err(|_| "Can't reach GitHub. Check your connection".to_string())?;
+    if !res.status().is_success() {
+        return Err("Couldn't read the update. Check that the token is valid and a release has been published".into());
+    }
+    let manifest: serde_json::Value = res.json().map_err(|e| format!("Couldn't read the update: {e}"))?;
+    if !is_newer(manifest["version"].as_str().unwrap_or_default(), &version) {
+        return Ok(None);
+    }
+    let config = Config { endpoints: vec![Url::parse(ENDPOINT).unwrap()], pubkey: PUBKEY.trim().into(), windows: None };
     let updater = UpdaterBuilder::new(version, config)
         .header("Authorization", format!("Bearer {token}"))
         .and_then(|b| b.build())
@@ -42,5 +52,25 @@ pub fn explain(e: cargo_packager_updater::Error) -> String {
         "Can't reach GitHub. Check your connection".into()
     } else {
         format!("Couldn't update: {m}")
+    }
+}
+
+/// Whether the update file's version ("2.1.0", or "v2.1.0") is newer than this one.
+fn is_newer(remote: &str, current: &Version) -> bool {
+    Version::parse(remote.trim_start_matches('v')).is_ok_and(|v| v > *current)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_newer_release_is_an_update() {
+        let now = Version::parse("2.0.0").unwrap();
+        assert!(!is_newer("1.2.1", &now)); // the Tauri app's last release
+        assert!(!is_newer("2.0.0", &now));
+        assert!(is_newer("2.0.1", &now));
+        assert!(is_newer("v2.1.0", &now));
+        assert!(!is_newer("", &now));
     }
 }
