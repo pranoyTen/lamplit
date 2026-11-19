@@ -1,5 +1,5 @@
 // Home, Library, one book, and Settings.
-import { ScrollView, LineEdit, ComboBox, Switch } from "std-widgets.slint";
+import { ScrollView, LineEdit, ComboBox, Switch, Slider } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons, Icon, Clickable, Btn, Link, Bar, Card, Cover, H1, H2, Muted } from "widgets.slint";
 import { State, BookCard, DlRow } from "state.slint";
@@ -346,6 +346,98 @@ export component SettingsPage {
                         spacing: 16px;
                         Text { text: "Theme"; color: Theme.ink; vertical-alignment: center; horizontal-stretch: 1; }
                         Btn { small: true; icon: Icons.theme; text: Theme.dark ? "Dark" : "Light"; clicked => { State.toggle-theme(); } }
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 12px;
+                max-width: 640px;
+                H2 { text: "Playback"; }
+                Card {
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 20px;
+                        HorizontalLayout {
+                            spacing: 16px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                Text { text: "Skip back and forward"; color: Theme.ink; }
+                                Muted { text: "What the skip buttons and media keys jump by"; font-size: 12px; wrap: word-wrap; }
+                            }
+                            ComboBox {
+                                width: 96px;
+                                model: ["10 s", "15 s", "30 s"];
+                                current-index <=> State.back-index;
+                                selected => { State.set-skips(State.back-index, State.fwd-index); }
+                            }
+                            ComboBox {
+                                width: 96px;
+                                model: ["15 s", "30 s", "60 s"];
+                                current-index <=> State.fwd-index;
+                                selected => { State.set-skips(State.back-index, State.fwd-index); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 16px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                Text { text: "Rewind a little after a long pause"; color: Theme.ink; wrap: word-wrap; }
+                                Muted { text: "Goes back 10 seconds when you resume after more than a minute"; font-size: 12px; wrap: word-wrap; }
+                            }
+                            Switch { checked <=> State.rewind; toggled => { State.set-rewind(self.checked); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 16px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                Text { text: "Play the next chapter automatically"; color: Theme.ink; wrap: word-wrap; }
+                                Muted { text: "When off, playback stops at the end of each chapter"; font-size: 12px; wrap: word-wrap; }
+                            }
+                            Switch { checked <=> State.auto-next; toggled => { State.set-auto-next(self.checked); } }
+                        }
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 12px;
+                max-width: 640px;
+                H2 { text: "Equalizer"; }
+                Card {
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 16px;
+                        HorizontalLayout {
+                            spacing: 16px;
+                            Text { text: "Preset"; color: Theme.ink; vertical-alignment: center; horizontal-stretch: 1; }
+                            ComboBox {
+                                width: 160px;
+                                model: ["Flat", "Voice", "Less bass", "More bass", "Treble", "Custom"];
+                                current-index <=> State.eq-preset;
+                                selected => { State.set-eq-preset(State.eq-preset); }
+                            }
+                        }
+                        // one vertical slider per band, +12 dB at the top
+                        HorizontalLayout {
+                            spacing: 8px;
+                            for g[i] in State.eq: VerticalLayout {
+                                spacing: 8px;
+                                horizontal-stretch: 1;
+                                Muted { text: (g > 0 ? "+" : "") + round(g) + " dB"; font-size: 12px; horizontal-alignment: center; }
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Slider {
+                                        orientation: vertical;
+                                        height: 160px;
+                                        minimum: -12;
+                                        maximum: 12;
+                                        step: 1;
+                                        value: -g; // a vertical slider grows downwards, so it holds the negated gain
+                                        changed(v) => { State.set-eq-band(i, -round(v)); }
+                                    }
+                                }
+                                Muted { text: ["100 Hz", "300 Hz", "1 kHz", "3 kHz", "8 kHz"][i]; font-size: 12px; horizontal-alignment: center; }
+                            }
+                        }
                     }
                 }
             }

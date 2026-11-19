@@ -139,4 +139,17 @@ export global State {
     callback choose-folder();
     callback set-limit(int);
     callback set-auto-remove(bool);
+
+    // playback settings
+    in-out property <int> back-index; // 10, 15 or 30 seconds
+    in-out property <int> fwd-index; // 15, 30 or 60 seconds
+    in-out property <bool> rewind;
+    in-out property <bool> auto-next;
+    in property <[float]> eq; // dB per band: 100 Hz, 300 Hz, 1 kHz, 3 kHz, 8 kHz
+    in-out property <int> eq-preset; // Flat, Voice, Less bass, More bass, Treble, then 5 = Custom
+    callback set-skips(int, int);
+    callback set-rewind(bool);
+    callback set-auto-next(bool);
+    callback set-eq-preset(int);
+    callback set-eq-band(int, float);
 }

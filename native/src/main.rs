@@ -5,6 +5,7 @@ mod api;
 mod book;
 mod covers;
 mod downloads;
+mod eq;
 mod http_source;
 mod library;
 mod media;
@@ -22,6 +23,7 @@ use souvlaki::{MediaControlEvent, SeekDirection};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::{Duration, Instant};
 
@@ -62,6 +64,9 @@ struct App {
     downloaded: HashSet<String>, // finished downloads, for the Library's Downloaded filter
     prefs: Prefs,
     places: HashMap<String, f64>, // where each book was left, kept here for listening offline
+    gains: Arc<eq::Gains>,
+    eq_model: Rc<VecModel<f32>>,
+    paused_at: Option<Instant>, // when playback was last paused, for the rewind after a long pause
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -72,15 +77,54 @@ struct Prefs {
     folder: Option<std::path::PathBuf>, // where new downloads go; None is the app's own data folder
     limit_gb: u64,                      // 0 = no limit
     auto_remove: bool,
+    back: u32,
+    fwd: u32,
+    rewind: bool,
+    auto_next: bool,
+    eq: [f32; 5],
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false }
+        Prefs { dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false, back: 15, fwd: 30, rewind: true, auto_next: true, eq: [0.0; 5] }
     }
 }
 
 const LIMITS_GB: [u64; 5] = [0, 5, 10, 20, 50];
+const BACKS: [u32; 3] = [10, 15, 30];
+const FWDS: [u32; 3] = [15, 30, 60];
+
+/// The preset these gains match, or 5 (Custom).
+fn eq_preset(db: [f32; 5]) -> i32 {
+    eq::PRESETS.iter().position(|(_, p)| *p == db).unwrap_or(5) as i32
+}
+
+/// Applies new equalizer gains to the playing audio and saves them. `redraw` replaces the sliders' list (a preset was picked);
+/// a moved slider only updates its own row, so the drag isn't interrupted.
+fn set_eq(db: [f32; 5], redraw: bool) {
+    let model = with_app(|a| {
+        a.prefs.eq = db;
+        a.gains.set(db);
+        if redraw {
+            a.eq_model = Rc::new(VecModel::from(db.to_vec()));
+        } else {
+            for (i, g) in db.iter().enumerate() {
+                if a.eq_model.row_data(i) != Some(*g) {
+                    a.eq_model.set_row_data(i, *g);
+                }
+            }
+        }
+        a.eq_model.clone()
+    });
+    save_prefs();
+    if let Some(ui) = window() {
+        let st = ui.global::<State>();
+        if redraw {
+            st.set_eq(model.into());
+        }
+        st.set_eq_preset(eq_preset(db));
+    }
+}
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -490,7 +534,19 @@ fn set_finished(id: String, finished: bool) {
 // ---- playback: one set of actions for the screens, the tray menu and the media keys ----
 fn toggle() {
     let paused = with_app(|a| {
-        if a.out.is_paused() { a.out.play() } else { a.out.pause() }
+        if a.out.is_paused() {
+            // back 10 seconds after a pause of more than a minute, so the listener picks up the thread
+            if a.prefs.rewind && a.paused_at.is_some_and(|t| t.elapsed() > Duration::from_secs(60)) {
+                if let Some(p) = &a.playing {
+                    p.engine.seek((p.engine.status.pos() - 10.0).max(0.0));
+                }
+            }
+            a.paused_at = None;
+            a.out.play();
+        } else {
+            a.out.pause();
+            a.paused_at = Some(Instant::now());
+        }
         a.out.is_paused()
     });
     if paused {
@@ -518,7 +574,7 @@ fn chapter_step(dir: i32) {
         let p = a.playing.as_ref()?;
         let t = p.engine.status.pos();
         if p.chapters.is_empty() {
-            return Some(if dir > 0 { t + 30.0 } else { t - 15.0 }.min(p.duration));
+            return Some(if dir > 0 { t + a.prefs.fwd as f64 } else { t - a.prefs.back as f64 }.min(p.duration));
         }
         if dir > 0 { book::next_start(&p.chapters, t) } else { book::prev_start(&p.chapters, t) }
     });
@@ -534,8 +590,8 @@ fn media_event(e: MediaControlEvent) {
         MediaControlEvent::Toggle => toggle(),
         MediaControlEvent::Next => chapter_step(1),
         MediaControlEvent::Previous => chapter_step(-1),
-        MediaControlEvent::Seek(SeekDirection::Forward) => skip(30.0),
-        MediaControlEvent::Seek(SeekDirection::Backward) => skip(-15.0),
+        MediaControlEvent::Seek(SeekDirection::Forward) => skip(with_app(|a| a.prefs.fwd) as f64),
+        MediaControlEvent::Seek(SeekDirection::Backward) => skip(-(with_app(|a| a.prefs.back) as f64)),
         MediaControlEvent::SeekBy(SeekDirection::Forward, d) => skip(d.as_secs_f64()),
         MediaControlEvent::SeekBy(SeekDirection::Backward, d) => skip(-d.as_secs_f64()),
         MediaControlEvent::SetPosition(p) => seek(p.0.as_secs_f64()),
@@ -628,7 +684,7 @@ fn play_book(id: String) {
             st.set_message(SharedString::new());
             let speed = with_app(|a| a.speed);
             let (http, token) = client.http();
-            let engine = Engine::spawn(http, token, s.tracks, s.start, speed, |out| {
+            let engine = Engine::spawn(http, token, s.tracks, s.start, speed, with_app(|a| a.gains.clone()), |out| {
                 let _ = slint::invoke_from_event_loop(move || {
                     with_app(|a| {
                         a.out.append(out);
@@ -696,6 +752,17 @@ fn tick(st: &State, tray: &Tray) {
             p.sleep = Sleep::Off;
             st.set_sleep_index(0);
             slept = true;
+        }
+        // with "play the next chapter automatically" off, stop at each chapter's end and park there, so Play goes on with the next
+        if !paused && !slept && !a.prefs.auto_next {
+            if let Some(i) = book::chapter_at(&p.chapters, pos).filter(|&i| Sleep::ChapterEnd(i).due(0.0, &p.chapters, pos)) {
+                a.out.pause();
+                p.engine.seek(p.chapters[i].end);
+                slept = true;
+            }
+        }
+        if slept {
+            a.paused_at = Some(Instant::now());
         }
         st.set_sleep_text(match p.sleep {
             Sleep::Off => SharedString::new(),
@@ -815,12 +882,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
     let (library, continuing, recent) = (Rc::new(VecModel::default()), Rc::new(VecModel::default()), Rc::new(VecModel::default()));
+    let gains = Arc::new(eq::Gains::default());
+    gains.set(prefs.eq);
+    let eq_model = Rc::new(VecModel::from(prefs.eq.to_vec()));
     APP.with(|a| {
         *a.borrow_mut() = Some(App {
             ui: ui.as_weak(), _sink: sink, out, client: None, books: vec![], in_progress: vec![], progress: HashMap::new(),
             library: library.clone(), continuing: continuing.clone(), recent: recent.clone(), covers, playing: None, speed: prefs.speed,
             media: None, shown: (None, Instant::now()), dl, downloaded: HashSet::new(), prefs: prefs.clone(),
-            places: load_json("places.json").unwrap_or_default(),
+            places: load_json("places.json").unwrap_or_default(), gains: gains.clone(), eq_model: eq_model.clone(), paused_at: None,
         })
     });
 
@@ -836,6 +906,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.set_speed(prefs.speed as f32);
     st.set_dl_limit_index(LIMITS_GB.iter().position(|g| *g == prefs.limit_gb).unwrap_or(2) as i32);
     st.set_auto_remove(prefs.auto_remove);
+    st.set_back_secs(prefs.back as i32);
+    st.set_fwd_secs(prefs.fwd as i32);
+    st.set_back_index(BACKS.iter().position(|s| *s == prefs.back).unwrap_or(1) as i32);
+    st.set_fwd_index(FWDS.iter().position(|s| *s == prefs.fwd).unwrap_or(1) as i32);
+    st.set_rewind(prefs.rewind);
+    st.set_auto_next(prefs.auto_next);
+    st.set_eq(eq_model.clone().into());
+    st.set_eq_preset(eq_preset(prefs.eq));
+    st.on_set_skips(|b, f| {
+        let (back, fwd) = (BACKS[b.clamp(0, 2) as usize], FWDS[f.clamp(0, 2) as usize]);
+        with_app(|a| (a.prefs.back, a.prefs.fwd) = (back, fwd));
+        save_prefs();
+        if let Some(ui) = window() {
+            let st = ui.global::<State>();
+            st.set_back_secs(back as i32);
+            st.set_fwd_secs(fwd as i32);
+        }
+    });
+    st.on_set_rewind(|on| {
+        with_app(|a| a.prefs.rewind = on);
+        save_prefs();
+    });
+    st.on_set_auto_next(|on| {
+        with_app(|a| a.prefs.auto_next = on);
+        save_prefs();
+    });
+    st.on_set_eq_preset(|i| {
+        let Some((_, db)) = eq::PRESETS.get(i as usize) else { return }; // "Custom" keeps the sliders as they are
+        set_eq(*db, true);
+    });
+    st.on_set_eq_band(|i, v| {
+        let mut db = with_app(|a| a.prefs.eq);
+        db[i.clamp(0, 4) as usize] = v;
+        set_eq(db, false);
+    });
     refresh_downloads();
 
     st.on_download(|id| {

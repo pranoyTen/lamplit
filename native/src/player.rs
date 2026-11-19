@@ -3,6 +3,7 @@
 // it; when the queue runs dry it plays silence. Seeking and speed changes bump a generation number so already-queued audio is dropped.
 use crate::api::Track;
 use crate::http_source::HttpSource;
+use crate::eq::{Eq, Gains};
 use crate::stretch::Stretch;
 use rodio::{ChannelCount, Decoder, SampleRate, Source};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering::Relaxed};
@@ -56,13 +57,13 @@ pub struct Engine {
 
 impl Engine {
     /// Starts decoding `tracks` at `at` seconds. `ready` gets the audio to hand to the output once the first file's format is known.
-    pub fn spawn(http: reqwest::blocking::Client, token: String, tracks: Vec<Track>, at: f64, speed: f64, ready: impl FnOnce(Out) + Send + 'static) -> Engine {
+    pub fn spawn(http: reqwest::blocking::Client, token: String, tracks: Vec<Track>, at: f64, speed: f64, gains: Arc<Gains>, ready: impl FnOnce(Out) + Send + 'static) -> Engine {
         let (tx, rx) = mpsc::channel();
         let status = Arc::new(Status::default());
         status.set_pos(at);
         let st = status.clone();
         std::thread::spawn(move || {
-            if let Err(e) = decode(http, token, tracks, at, speed, rx, st.clone(), ready) {
+            if let Err(e) = decode(http, token, tracks, at, speed, gains, rx, st.clone(), ready) {
                 st.fail(e);
             }
         });
@@ -133,7 +134,7 @@ fn remix(data: &[f32], from: usize, to: usize, out: &mut Vec<f32>) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn decode(http: reqwest::blocking::Client, token: String, tracks: Vec<Track>, at: f64, mut speed: f64, rx: Receiver<Cmd>, sta: Arc<Status>, ready: impl FnOnce(Out)) -> Result<(), String> {
+fn decode(http: reqwest::blocking::Client, token: String, tracks: Vec<Track>, at: f64, mut speed: f64, gains: Arc<Gains>, rx: Receiver<Cmd>, sta: Arc<Status>, ready: impl FnOnce(Out)) -> Result<(), String> {
     let st = &*sta;
     let (mut ti, off) = locate(&tracks, at);
     let mut dec = open(&http, &token, &tracks[ti])?;
@@ -142,7 +143,9 @@ fn decode(http: reqwest::blocking::Client, token: String, tracks: Vec<Track>, at
     // shortcut: a later file with a different sample rate plays at the wrong pitch; resample (rubato) if a real book ever does this
     let (ch, rate) = (dec.channels(), dec.sample_rate());
     let (q_tx, q_rx) = mpsc::sync_channel::<Chunk>(24);
-    ready(Out { rx: q_rx, st: sta.clone(), cur: vec![], idx: 0, epoch: 0, pos: at, speed, ch, rate });
+    let mut eq = Eq::new(rate.get(), ch.get() as usize);
+    eq.set(gains.get());
+    ready(Out { rx: q_rx, st: sta.clone(), cur: vec![], idx: 0, epoch: 0, pos: at, speed, ch, rate, eq, eq_version: gains.version(), gains });
     let (chn, hz) = (ch.get() as usize, rate.get() as f64);
     let mut stretch = Stretch::new(chn, rate.get());
     stretch.reset(speed, at * hz);
@@ -240,6 +243,9 @@ pub struct Out {
     speed: f64,
     ch: ChannelCount,
     rate: SampleRate,
+    eq: Eq,
+    gains: Arc<Gains>,
+    eq_version: u64,
 }
 
 impl Iterator for Out {
@@ -256,9 +262,14 @@ impl Iterator for Out {
                 self.idx += 1;
                 let ch = self.ch.get() as usize;
                 if self.idx % (ch * 512) == 0 {
+                    // now and then: follow a moved equalizer slider
+                    if self.gains.version() != self.eq_version {
+                        self.eq_version = self.gains.version();
+                        self.eq.set(self.gains.get());
+                    }
                     self.st.set_pos(self.pos + (self.idx / ch) as f64 / self.rate.get() as f64 * self.speed);
                 }
-                return Some(v);
+                return Some(self.eq.process(v));
             }
             match self.rx.try_recv() {
                 Ok(c) if c.epoch == epoch => {
