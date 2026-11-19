@@ -47,6 +47,8 @@ export component AppWindow inherits Window {
     default-font-family: Theme.sans;
     default-font-size: 14px;
     in-out property <string> server; // the sign-in form's address, filled from the last sign-in
+    in property <image> app-icon; // set from Rust as plain pixels, like the tray icon
+    icon: root.app-icon;
 
     ThemeSync {}
     HorizontalLayout {
