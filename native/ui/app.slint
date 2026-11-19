@@ -1,13 +1,14 @@
 // The main window: the sidebar, the current screen, and the player bar along the bottom.
 import { Theme, ThemeSync } from "theme.slint";
 import { Icons, Icon, Clickable, Btn, Muted } from "widgets.slint";
-import { State, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent } from "state.slint";
-import { HomePage, LibraryPage, BookScreen, SettingsPage, DownloadsPage } from "screens.slint";
+import { State, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, LibRow } from "state.slint";
+import { HomePage, LibraryPage, BookScreen, DownloadsPage } from "screens.slint";
+import { SettingsPage } from "settings.slint";
 import { SeriesPage, StatsPage } from "pages.slint";
 import { PlayerBar, PlayerPage } from "player.slint";
 import { MiniPlayer } from "mini.slint";
 
-export { State, Theme, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, MiniPlayer }
+export { State, Theme, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, MiniPlayer, LibRow }
 
 component NavItem inherits Clickable {
     in property <string> text;
@@ -51,6 +52,32 @@ export component AppWindow inherits Window {
     icon: root.app-icon;
 
     ThemeSync {}
+    // keyboard shortcuts (Settings > Keyboard shortcuts); a focused text field gets its keys first, so typing never pauses
+    forward-focus: keys;
+    keys := FocusScope {
+    key-pressed(e) => {
+        if e.text == " " && State.has-book {
+            State.toggle();
+            return accept;
+        }
+        if e.text == Key.LeftArrow && State.has-book {
+            State.skip(-State.back-secs);
+            return accept;
+        }
+        if e.text == Key.RightArrow && State.has-book {
+            State.skip(State.fwd-secs);
+            return accept;
+        }
+        if e.text == Key.UpArrow {
+            State.volume-step(0.05);
+            return accept;
+        }
+        if e.text == Key.DownArrow {
+            State.volume-step(-0.05);
+            return accept;
+        }
+        reject
+    }
     HorizontalLayout {
         Rectangle {
             width: 240px;
@@ -135,6 +162,7 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
     }
 }
 

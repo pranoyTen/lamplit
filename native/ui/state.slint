@@ -64,6 +64,14 @@ export struct Recent {
     tint: color,
 }
 
+export struct LibRow {
+    id: string,
+    name: string,
+    on: bool,
+    locked: bool, // the last library shown can't be hidden
+    note: string,
+}
+
 export struct ListRow {
     title: string,
     sub: string,
@@ -181,6 +189,28 @@ export global State {
     in property <[BarItem]> top-authors;
     in property <[Recent]> recent-finished;
     callback show-stats();
+
+    // settings that match the Tauri app's page
+    in property <string> username;
+    in property <string> user-initial: "?";
+    in property <string> server-address;
+    in property <[LibRow]> libraries;
+    in property <float> default-speed: 1;
+    in-out property <int> sleep-default; // 0 off, 15, 30, 45 minutes, end of chapter
+    in-out property <bool> tray: true;
+    in-out property <bool> sync: true;
+    in-out property <bool> metered;
+    in property <string> dl-used;
+    in property <bool> dl-custom-folder;
+    in property <string> sign-in-error;
+    callback toggle-library(string);
+    callback set-default-speed(float);
+    callback set-sleep-default(int);
+    callback set-tray(bool);
+    callback set-sync(bool);
+    callback set-metered(bool);
+    callback use-default-folder();
+    callback volume-step(float);
 
     // updates
     in property <string> version;

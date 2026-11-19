@@ -1,0 +1,381 @@
+// Settings, laid out like the Tauri app's page: sections of labelled rows in cards, divided by hairlines.
+import { ScrollView, LineEdit, ComboBox, Slider } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Clickable, Btn, Card, H1, H2, Muted, Toggle } from "widgets.slint";
+import { State } from "state.slint";
+
+// one setting: its name and a line about it on the left, the control on the right; a hairline above all but the first
+component SetRow {
+    in property <string> label;
+    in property <string> desc;
+    in property <bool> first;
+    VerticalLayout {
+        if !root.first: Rectangle { height: 1px; background: Theme.hairline; }
+        HorizontalLayout {
+            padding-top: 16px;
+            padding-bottom: 16px;
+            spacing: 24px;
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                min-width: 0;
+                Text { text: root.label; font-weight: 500; color: Theme.ink; wrap: word-wrap; }
+                if root.desc != "": Muted { text: root.desc; font-size: 12px; wrap: word-wrap; }
+            }
+            VerticalLayout {
+                alignment: center;
+                @children
+            }
+        }
+    }
+}
+
+// a choice button in a row of them (the Tauri app's .seg): square-ish, filled when chosen
+component Seg inherits Clickable {
+    in property <string> text;
+    in property <bool> on;
+    label: text;
+    height: 36px;
+    min-width: t.preferred-width + 32px;
+    accessible-checked: on;
+    Rectangle {
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.on ? Theme.ink : Theme.border-strong;
+        background: root.on ? Theme.ink : (root.hover ? Theme.hover : transparent);
+    }
+    t := Text { text: root.text; color: root.on ? Theme.s100 : Theme.ink; font-weight: 500; }
+}
+
+component Kbd inherits Rectangle {
+    in property <string> text;
+    height: 24px;
+    min-width: t.preferred-width + 16px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Theme.border-strong;
+    background: Theme.s200;
+    t := Text { text: root.text; font-size: 12px; font-weight: 500; color: Theme.ink; }
+}
+
+component Section {
+    in property <string> title;
+    VerticalLayout {
+        spacing: 12px;
+        H2 { text: root.title; }
+        Card {
+            VerticalLayout {
+                padding-left: 24px;
+                padding-right: 24px;
+                @children
+            }
+        }
+    }
+}
+
+export component SettingsPage {
+    in-out property <string> server;
+    property <string> user;
+    property <string> pass;
+    property <bool> show-pw;
+    sv := ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: 32px;
+            spacing: 24px;
+            alignment: start;
+            H1 { text: "Settings"; }
+            VerticalLayout {
+                spacing: 32px;
+                max-width: 800px;
+
+                Section {
+                    title: "Server connection";
+                    if State.signed-in: HorizontalLayout {
+                        padding-top: 16px;
+                        padding-bottom: 16px;
+                        spacing: 16px;
+                        Rectangle {
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 24px;
+                            background: Theme.s200;
+                            border-width: 1px;
+                            border-color: Theme.hairline;
+                            Text { text: State.user-initial; font-family: Theme.serif; font-weight: 600; font-size: 22px; color: Theme.ink; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            min-width: 0;
+                            Text { text: "Signed in as " + State.username; font-weight: 500; color: Theme.ink; overflow: elide; }
+                            Muted { text: State.server-address; font-size: 12px; }
+                        }
+                        Text { text: State.offline ? "Offline" : "Connected"; color: State.offline ? Theme.danger : Theme.accent; font-size: 12px; font-weight: 500; vertical-alignment: center; }
+                    }
+                    if State.signed-in: SetRow {
+                        label: "Switch account or server";
+                        Btn { text: "Sign out"; clicked => { State.sign-out(); } }
+                    }
+                    if !State.signed-in: SetRow {
+                        first: true;
+                        label: "Server address";
+                        desc: "Where your Audiobookshelf server is hosted, including http:// or https://";
+                        LineEdit { width: 280px; placeholder-text: "https://library.example.com"; text <=> root.server; }
+                    }
+                    if !State.signed-in: SetRow {
+                        label: "Username";
+                        desc: "The account set up in Audiobookshelf";
+                        LineEdit { width: 280px; placeholder-text: "Username"; text <=> root.user; }
+                    }
+                    if !State.signed-in: SetRow {
+                        label: "Password";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            LineEdit {
+                                width: 280px;
+                                placeholder-text: "Password";
+                                input-type: root.show-pw ? InputType.text : InputType.password;
+                                text <=> root.pass;
+                                accepted => {
+                                    State.sign-in(root.server, root.user, root.pass);
+                                }
+                            }
+                            Btn { text: root.show-pw ? "Hide" : "Show"; clicked => { root.show-pw = !root.show-pw; } }
+                        }
+                    }
+                    if !State.signed-in && State.sign-in-error != "": VerticalLayout {
+                        padding-bottom: 12px;
+                        spacing: 12px;
+                        Rectangle { height: 1px; background: Theme.hairline; }
+                        Text { text: State.sign-in-error; color: Theme.danger; wrap: word-wrap; }
+                    }
+                    if !State.signed-in: VerticalLayout {
+                        Rectangle { height: 1px; background: Theme.hairline; }
+                        HorizontalLayout {
+                            padding-top: 16px;
+                            padding-bottom: 16px;
+                            spacing: 24px;
+                            Btn {
+                                primary: true;
+                                text: State.busy ? "Signing in…" : "Sign in";
+                                enabled: !State.busy;
+                                clicked => { State.sign-in(root.server, root.user, root.pass); }
+                            }
+                            Muted { text: "Use the same username and password as the Audiobookshelf web app"; font-size: 12px; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
+                        }
+                    }
+                }
+
+                if State.signed-in && State.libraries.length > 0: Section {
+                    title: "Libraries";
+                    for l[i] in State.libraries: SetRow {
+                        first: i == 0;
+                        label: l.name;
+                        desc: l.note;
+                        Toggle { checked: l.on; enabled: !l.locked; toggled => { State.toggle-library(l.id); } }
+                    }
+                }
+
+                Section {
+                    title: "Playback";
+                    SetRow {
+                        first: true;
+                        label: "Default speed";
+                        desc: "Used for books you haven't changed the speed of";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            for s in [0.75, 1, 1.25, 1.5, 2]: Seg { text: s + "×"; on: State.default-speed == s; clicked => { State.set-default-speed(s); } }
+                        }
+                    }
+                    SetRow {
+                        label: "Skip back";
+                        desc: "Also used by the left arrow key";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            for s[i] in [10, 15, 30]: Seg {
+                                text: s + "s";
+                                on: State.back-index == i;
+                                clicked => {
+                                    State.back-index = i;
+                                    State.set-skips(State.back-index, State.fwd-index);
+                                }
+                            }
+                        }
+                    }
+                    SetRow {
+                        label: "Skip forward";
+                        desc: "Also used by the right arrow key";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            for s[i] in [15, 30, 60]: Seg {
+                                text: s + "s";
+                                on: State.fwd-index == i;
+                                clicked => {
+                                    State.fwd-index = i;
+                                    State.set-skips(State.back-index, State.fwd-index);
+                                }
+                            }
+                        }
+                    }
+                    SetRow {
+                        label: "Default sleep timer";
+                        desc: "Starts when you press play, then pauses";
+                        ComboBox {
+                            width: 180px;
+                            model: ["Off", "15 minutes", "30 minutes", "45 minutes", "End of chapter"];
+                            current-index <=> State.sleep-default;
+                            selected => { State.set-sleep-default(State.sleep-default); }
+                        }
+                    }
+                    SetRow {
+                        label: "Step back after a pause";
+                        desc: "Rewind 10 seconds when you resume after stopping for over a minute";
+                        Toggle { checked <=> State.rewind; toggled => { State.set-rewind(self.checked); } }
+                    }
+                    SetRow {
+                        label: "Play the next chapter automatically";
+                        desc: "Keep going at the end of a chapter instead of stopping";
+                        Toggle { checked <=> State.auto-next; toggled => { State.set-auto-next(self.checked); } }
+                    }
+                    SetRow {
+                        label: "Keep playing when the window is closed";
+                        desc: "Closing hides Lectern in the system tray. Quit from the tray icon";
+                        Toggle { checked <=> State.tray; toggled => { State.set-tray(self.checked); } }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 12px;
+                    H2 { text: "Equalizer"; }
+                    Card {
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 8px;
+                            ComboBox {
+                                model: ["Flat", "Voice", "Less bass", "More bass", "Treble", "Custom"];
+                                current-index <=> State.eq-preset;
+                                selected => { State.set-eq-preset(State.eq-preset); }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                for g[i] in State.eq: VerticalLayout {
+                                    spacing: 8px;
+                                    horizontal-stretch: 1;
+                                    Muted { text: (g > 0 ? "+" : "") + round(g) + " dB"; font-size: 12px; horizontal-alignment: center; }
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Slider {
+                                            orientation: vertical;
+                                            height: 160px;
+                                            minimum: -12;
+                                            maximum: 12;
+                                            step: 1;
+                                            value: -g; // a vertical slider grows downwards, so it holds the negated gain
+                                            changed(v) => { State.set-eq-band(i, -round(v)); }
+                                        }
+                                    }
+                                    Muted { text: ["100 Hz", "300 Hz", "1 kHz", "3 kHz", "8 kHz"][i]; font-size: 12px; horizontal-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    title: "Sync and downloads";
+                    SetRow {
+                        first: true;
+                        label: "Sync progress with your server";
+                        desc: "Keep your place on every device you listen on";
+                        Toggle { checked <=> State.sync; toggled => { State.set-sync(self.checked); } }
+                    }
+                    SetRow {
+                        label: "Download on metered connections";
+                        desc: "Allow downloads when your connection is limited. Not every computer reports this";
+                        Toggle { checked <=> State.metered; toggled => { State.set-metered(self.checked); } }
+                    }
+                    SetRow {
+                        label: "Remove downloads when a book is finished";
+                        desc: "Frees space automatically. Finished books stay in your library";
+                        Toggle { checked <=> State.auto-remove; toggled => { State.set-auto-remove(self.checked); } }
+                    }
+                    SetRow {
+                        label: "Offline storage limit";
+                        desc: State.dl-used + " used right now. Books that would pass it are not downloaded";
+                        ComboBox {
+                            width: 140px;
+                            model: ["5 GB", "10 GB", "20 GB", "50 GB", "No limit"];
+                            current-index <=> State.dl-limit-index;
+                            selected => { State.set-limit(State.dl-limit-index); }
+                        }
+                    }
+                    SetRow {
+                        label: "Download location";
+                        desc: State.dl-folder + " · applies to new downloads";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Btn { text: "Choose folder"; clicked => { State.choose-folder(); } }
+                            if State.dl-custom-folder: Btn { text: "Use default"; clicked => { State.use-default-folder(); } }
+                        }
+                    }
+                }
+
+                Section {
+                    title: "Appearance";
+                    SetRow {
+                        first: true;
+                        label: "Theme";
+                        desc: "Choose light or dark";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Seg { text: "Light"; on: !Theme.dark; clicked => { if Theme.dark { State.toggle-theme(); } } }
+                            Seg { text: "Dark"; on: Theme.dark; clicked => { if !Theme.dark { State.toggle-theme(); } } }
+                        }
+                    }
+                }
+
+                Section {
+                    title: "Updates";
+                    SetRow {
+                        first: true;
+                        label: "Version " + State.version;
+                        desc: State.upd-status;
+                        if State.upd-available == "": Btn { text: "Check for updates"; enabled: !State.upd-busy; clicked => { State.check-updates(); } }
+                        if State.upd-available != "": Btn { primary: true; text: "Update and restart"; enabled: !State.upd-busy; clicked => { State.install-update(); } }
+                    }
+                    SetRow {
+                        label: "GitHub token";
+                        desc: "Read-only access to the Lectern repository. Kept on this computer only";
+                        LineEdit {
+                            width: 280px;
+                            placeholder-text: "github_pat_…";
+                            input-type: InputType.password;
+                            text <=> State.gh-token;
+                            edited => { State.save-token(); }
+                        }
+                    }
+                }
+
+                Section {
+                    title: "Keyboard shortcuts";
+                    SetRow {
+                        first: true;
+                        label: "Play or pause";
+                        HorizontalLayout { spacing: 4px; Kbd { text: "Space"; } }
+                    }
+                    SetRow {
+                        label: "Skip back or forward";
+                        HorizontalLayout { spacing: 4px; Kbd { text: "Left"; } Kbd { text: "Right"; } }
+                    }
+                    SetRow {
+                        label: "Volume up or down";
+                        HorizontalLayout { spacing: 4px; Kbd { text: "Up"; } Kbd { text: "Down"; } }
+                    }
+                }
+            }
+        }
+    }
+}

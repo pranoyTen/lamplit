@@ -16,6 +16,8 @@ pub struct Book {
     pub author: String,
     pub duration: f64,
     pub added: f64,
+    #[serde(default)]
+    pub library_id: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -66,6 +68,7 @@ fn book_of(i: &Value) -> Book {
         author: md["authorName"].as_str().or(md["author"].as_str()).unwrap_or_default().into(),
         duration: i["media"]["duration"].as_f64().unwrap_or(0.0),
         added: i["addedAt"].as_f64().unwrap_or(0.0),
+        library_id: s(&i["libraryId"]),
     }
 }
 
@@ -158,29 +161,34 @@ impl Client {
         Ok(res.json().unwrap_or(Value::Null))
     }
 
-    /// Signs in and returns a client holding the user's token.
-    pub fn login(server: &str, username: &str, password: &str) -> Result<Self, String> {
+    /// Signs in and returns a client holding the user's token, and the username as the server spells it.
+    pub fn login(server: &str, username: &str, password: &str) -> Result<(Self, String), String> {
         let c = Client::new(server, "")?;
         let v = c.call(reqwest::Method::POST, "/login", Some(json!({ "username": username, "password": password })))?;
         let u = &v["user"];
         let token = u["token"].as_str().or(u["accessToken"].as_str()).ok_or("The server sent no token")?;
-        Client::new(&c.base, token)
+        Ok((Client::new(&c.base, token)?, u["username"].as_str().unwrap_or(username).to_string()))
     }
 
     /// The first page of books in every book library.
     // shortcut: first 100 books per library, no paging; add paging with the real library screen
     pub fn books(&self) -> Result<Vec<Book>, String> {
         let mut out = vec![];
-        for lib in self.book_libraries()? {
+        for (lib, _) in self.libraries()? {
             let r = self.call(reqwest::Method::GET, &format!("/api/libraries/{lib}/items?limit=100&sort=media.metadata.title"), None)?;
-            out.extend(r["results"].as_array().into_iter().flatten().map(book_of));
+            out.extend(r["results"].as_array().into_iter().flatten().map(|i| Book { library_id: lib.clone(), ..book_of(i) }));
         }
         Ok(out)
     }
 
-    fn book_libraries(&self) -> Result<Vec<String>, String> {
+    /// The book libraries (podcast libraries are left out): id and name.
+    pub fn libraries(&self) -> Result<Vec<(String, String)>, String> {
         let libs = self.call(reqwest::Method::GET, "/api/libraries", None)?;
-        Ok(libs["libraries"].as_array().into_iter().flatten().filter(|l| l["mediaType"] != "podcast").map(|l| s(&l["id"])).collect())
+        Ok(libs["libraries"].as_array().into_iter().flatten().filter(|l| l["mediaType"] != "podcast").map(|l| (s(&l["id"]), s(&l["name"]))).collect())
+    }
+
+    fn book_libraries(&self) -> Result<Vec<String>, String> {
+        Ok(self.libraries()?.into_iter().map(|l| l.0).collect())
     }
 
     /// Every series in the book libraries, each with its books in reading order.
@@ -217,6 +225,11 @@ impl Client {
             .map(|p| (s(&p["libraryItemId"]), p["finishedAt"].as_f64().or(p["lastUpdate"].as_f64()).unwrap_or(0.0)))
             .collect();
         Ok(Listening { days, items, finished })
+    }
+
+    /// The signed-in user's name, for a sign-in saved before the name was kept.
+    pub fn username(&self) -> Result<String, String> {
+        Ok(s(&self.call(reqwest::Method::GET, "/api/me", None)?["username"]))
     }
 
     /// How far the user is in each book: 0..1, and 1 for finished.

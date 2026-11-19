@@ -69,6 +69,7 @@ struct Shared {
     st: Mutex<St>,
     cv: Condvar,
     changed: Box<dyn Fn() + Send + Sync>,
+    allowed: Box<dyn Fn() -> bool + Send + Sync>, // false holds the queue, e.g. on a metered connection; asked again every 30 seconds
 }
 
 #[derive(Clone)]
@@ -92,7 +93,7 @@ fn disk(e: std::io::Error) -> Fail {
 impl Downloads {
     /// Loads the saved list and starts the worker. `changed` runs on the worker thread whenever the list or a download's progress
     /// changes (progress at most a few times a second).
-    pub fn new(manifest: PathBuf, folder: PathBuf, limit: u64, chunk: u64, changed: impl Fn() + Send + Sync + 'static) -> Self {
+    pub fn new(manifest: PathBuf, folder: PathBuf, limit: u64, chunk: u64, changed: impl Fn() + Send + Sync + 'static, allowed: impl Fn() -> bool + Send + Sync + 'static) -> Self {
         let mut items: Vec<Item> = fs::read_to_string(&manifest).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         for it in &mut items {
             if it.status == Status::Active {
@@ -103,6 +104,7 @@ impl Downloads {
             st: Mutex::new(St { items, paused: false, client: None, folder, limit, manifest, chunk, last_note: Instant::now() }),
             cv: Condvar::new(),
             changed: Box::new(changed),
+            allowed: Box::new(allowed),
         });
         let worker = sh.clone();
         std::thread::spawn(move || work(&worker));
@@ -222,7 +224,11 @@ fn work(sh: &Shared) {
     loop {
         let (id, client) = {
             let ready = |s: &mut St| !s.paused && s.client.is_some() && s.items.iter().any(|i| i.status == Status::Queued);
-            let mut s = sh.cv.wait_while(sh.st.lock().unwrap(), |s| !ready(s)).unwrap();
+            let mut s = sh.st.lock().unwrap();
+            // wait for work; when it is held back (a metered connection), look again every 30 seconds
+            while !ready(&mut s) || !(sh.allowed)() {
+                s = sh.cv.wait_timeout(s, Duration::from_secs(30)).unwrap().0;
+            }
             let it = s.items.iter_mut().find(|i| i.status == Status::Queued).unwrap();
             it.status = Status::Active;
             it.error.clear();
@@ -426,7 +432,7 @@ mod tests {
         let client = Client::new(&addr, "t").unwrap();
 
         // pretend an earlier run stopped 5 000 bytes in, with only 3 000 of them really on disk
-        let d = Downloads::new(tmp.join("downloads.json"), tmp.join("books"), 0, 4096, || {});
+        let d = Downloads::new(tmp.join("downloads.json"), tmp.join("books"), 0, 4096, || {}, || true);
         d.add("b1", "Book", "Author");
         {
             let mut s = d.0.st.lock().unwrap();
@@ -449,7 +455,7 @@ mod tests {
         assert_eq!(fs::read(tmp.join("books/b2/0.mp3")).unwrap(), body);
 
         // the list survives a restart
-        let again = Downloads::new(tmp.join("downloads.json"), tmp.join("books"), 0, 4096, || {});
+        let again = Downloads::new(tmp.join("downloads.json"), tmp.join("books"), 0, 4096, || {}, || true);
         assert_eq!(again.list().len(), 2);
 
         // over the limit: refused with a message, nothing written

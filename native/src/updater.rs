@@ -14,7 +14,7 @@ pub fn current() -> &'static str {
 pub fn check(token: &str) -> Result<Option<Update>, String> {
     let token = token.trim();
     if token.is_empty() {
-        return Err("Add a GitHub token first: the repository is private, so updates need one".into());
+        return Err("Add a GitHub token below first".into());
     }
     let config = Config { endpoints: vec![Url::parse(ENDPOINT).unwrap()], pubkey: PUBKEY.trim().into(), windows: None };
     let version = Version::parse(current()).map_err(|e| e.to_string())?;
