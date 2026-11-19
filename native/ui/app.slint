@@ -5,8 +5,9 @@ import { State, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent 
 import { HomePage, LibraryPage, BookScreen, SettingsPage, DownloadsPage } from "screens.slint";
 import { SeriesPage, StatsPage } from "pages.slint";
 import { PlayerBar, PlayerPage } from "player.slint";
+import { MiniPlayer } from "mini.slint";
 
-export { State, Theme, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent }
+export { State, Theme, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, MiniPlayer }
 
 component NavItem inherits Clickable {
     in property <string> text;
@@ -135,7 +136,8 @@ export component AppWindow inherits Window {
     }
 }
 
-// The tray icon. Left-click shows the window; the menu also plays or pauses, and quits (closing the window only hides it).
+// The tray icon. Left-click opens the mini player; the menu shows the window, plays or pauses, and quits (closing the window only
+// hides it).
 export component Tray inherits SystemTrayIcon {
     in property <image> image; // set from Rust as plain pixels: an image embedded for the software renderer cannot become a tray icon
     icon: root.image;
@@ -143,9 +145,10 @@ export component Tray inherits SystemTrayIcon {
     in property <bool> has-book;
     in property <bool> playing;
     callback show-window();
+    callback show-mini();
     callback toggle();
     callback quit();
-    clicked => { root.show-window(); }
+    clicked => { root.show-mini(); }
     Menu {
         MenuItem { title: "Show Lectern"; activated => { root.show-window(); } }
         MenuItem { title: root.playing ? "Pause" : "Play"; enabled: root.has-book; activated => { root.toggle(); } }

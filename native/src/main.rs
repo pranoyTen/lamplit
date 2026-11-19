@@ -9,6 +9,7 @@ mod eq;
 mod http_source;
 mod library;
 mod media;
+mod mini;
 mod player;
 mod stats;
 mod stretch;
@@ -1028,6 +1029,43 @@ fn remove_bookmark(i: usize) {
     });
 }
 
+// ---- the tray mini player ----
+#[derive(Default)]
+struct MiniState {
+    shown_at: Option<Instant>,
+    hidden_at: Option<Instant>,
+    styled: bool, // taken out of the taskbar (done once, the first time it opens)
+}
+
+thread_local! {
+    static MINI: RefCell<Option<slint::Weak<MiniPlayer>>> = const { RefCell::new(None) };
+}
+
+fn hide_mini(mini: &MiniPlayer, ms: &RefCell<MiniState>) {
+    let _ = mini.hide();
+    ms.borrow_mut().hidden_at = Some(Instant::now());
+}
+
+/// Copies what the main window shows about the playing book into the mini player.
+fn fill_mini(mini: &MiniPlayer) {
+    let Some(ui) = window() else { return };
+    let st = ui.global::<State>();
+    mini.set_has_book(st.get_has_book());
+    mini.set_book_title(st.get_now_title());
+    mini.set_chapter(st.get_chapter_text());
+    mini.set_author(st.get_now_author());
+    mini.set_cover(st.get_now_cover());
+    mini.set_tint(st.get_now_tint());
+    mini.set_playing(st.get_playing());
+    mini.set_has_chapters(st.get_has_chapters());
+    mini.set_back_secs(st.get_back_secs());
+    mini.set_fwd_secs(st.get_fwd_secs());
+    let span = (st.get_seek_max() - st.get_seek_min()).max(1.0);
+    mini.set_progress(((st.get_position() - st.get_seek_min()) / span).clamp(0.0, 1.0));
+    mini.set_t0(st.get_pos_text());
+    mini.set_t1(st.get_left_text());
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()?;
     sink.log_on_drop(false);
@@ -1177,6 +1215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             t.set_dark(!t.get_dark());
             with_app(|a| a.prefs.dark = t.get_dark());
             save_prefs();
+            MINI.with(|m| if let Some(mini) = m.borrow().as_ref().and_then(|w| w.upgrade()) { mini.global::<Theme>().set_dark(t.get_dark()) });
         }
     });
     st.on_refresh_library(refresh_library);
@@ -1225,11 +1264,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     tray.show()?;
 
+    // the mini player: left-click on the tray icon opens it beside the icon, a click anywhere else closes it
+    let mini = MiniPlayer::new()?;
+    mini.global::<Theme>().set_dark(prefs.dark);
+    if !cfg!(windows) {
+        mini.global::<Theme>().set_sans("".into());
+    }
+    let mini_state = Rc::new(RefCell::new(MiniState::default()));
+    MINI.with(|m| *m.borrow_mut() = Some(mini.as_weak()));
+    let (m, ms) = (mini.as_weak(), mini_state.clone());
+    tray.on_show_mini(move || {
+        let Some(mini) = m.upgrade() else { return };
+        if mini.window().is_visible() {
+            return hide_mini(&mini, &ms);
+        }
+        // the click on the icon is what took the focus away and closed it: don't reopen straight away
+        if ms.borrow().hidden_at.is_some_and(|t| t.elapsed() < Duration::from_millis(400)) {
+            return;
+        }
+        fill_mini(&mini);
+        mini::place(mini.window(), 340.0, 268.0);
+        let _ = mini.show();
+        let first = !std::mem::replace(&mut ms.borrow_mut().styled, true);
+        if first {
+            // the taskbar button only goes once the window is shown again with the new style
+            mini::hide_from_taskbar(mini.window());
+            let _ = mini.hide();
+            let _ = mini.show();
+            mini::place(mini.window(), 340.0, 268.0);
+        }
+        mini::bring_to_front(mini.window());
+        ms.borrow_mut().shown_at = Some(Instant::now());
+    });
+    mini.on_toggle(toggle);
+    mini.on_skip(|d| skip(d as f64));
+    mini.on_chapter_step(chapter_step);
+    let (m, ms) = (mini.as_weak(), mini_state.clone());
+    mini.on_dismiss(move || {
+        if let Some(mini) = m.upgrade() {
+            hide_mini(&mini, &ms);
+        }
+    });
+    let (w, m, ms) = (ui.as_weak(), mini.as_weak(), mini_state.clone());
+    mini.on_open_main(move || {
+        if let Some(mini) = m.upgrade() {
+            hide_mini(&mini, &ms);
+        }
+        if let Some(ui) = w.upgrade() {
+            let _ = ui.show();
+            mini::bring_to_front(ui.window());
+        }
+    });
+
     let timer = Timer::default();
-    let (w, t) = (ui.as_weak(), tray.as_weak());
+    let (w, t, m, ms) = (ui.as_weak(), tray.as_weak(), mini.as_weak(), mini_state.clone());
     timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
         if let (Some(ui), Some(tray)) = (w.upgrade(), t.upgrade()) {
             tick(&ui.global::<State>(), &tray);
+        }
+        if let Some(mini) = m.upgrade().filter(|m| m.window().is_visible()) {
+            fill_mini(&mini);
+            let settled = ms.borrow().shown_at.is_some_and(|t| t.elapsed() > Duration::from_millis(400));
+            if settled && !mini::has_focus(mini.window()) {
+                hide_mini(&mini, &ms);
+            }
         }
     });
 

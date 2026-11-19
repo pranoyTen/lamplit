@@ -2722,6 +2722,7 @@ dependencies = [
  "slint",
  "slint-build",
  "souvlaki",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
