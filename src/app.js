@@ -13,7 +13,7 @@ const state = {
   libId: store.get('lib', null),
   dlcfg: store.get('dlcfg', { limitGB: 10, dir: null }), // download cap in GB and chosen folder (null = app data)
   statsRange: 'year', stats: null,
-  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, tray: false, ...store.get('pb', {}) }, // Settings > Playback
+  pb: { speed: 1, back: 15, fwd: 30, sleep: 0, rewind: true, autoNext: true, sync: true, metered: false, autoDelete: false, tray: false, eq: [0, 0, 0, 0, 0], ...store.get('pb', {}) }, // Settings > Playback
   hidden: store.get('hidden', []), // ids of libraries switched off in Settings
   upd: { s: 'idle' }, version: '', items: [], q: '', q0: '', pct: {}, filter: 'all', sort: 'added', bm: [], bmErr: '',
   acct: { address: store.get('session', null)?.server ?? '', username: '', password: '', showPw: false, busy: false, error: '' }
@@ -316,6 +316,25 @@ const bmHtml = () => (state.bmErr ? `<div role="alert" class="danger">Error: ${e
   ? `<ul class="plain card pp-bms">${state.bm.map(b => `<li><button data-act="bmgo" data-v="${b.time}"><span>${esc(b.title)}</span><span class="cap muted">${clock(b.time)}</span></button><button class="ib" data-act="bmdel" data-v="${b.time}" aria-label="Delete bookmark ${esc(b.title)}">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 16)}</button></li>`).join('')}</ul>`
   : '<p class="muted">No bookmarks yet</p>');
 const paintBm = () => { const el = document.getElementById('pp-bm'); if (el) el.innerHTML = bmHtml(); };
+
+// equalizer: the audio element runs through five filters (a low shelf, three peaks, a high shelf) to the speakers
+const EQ_BANDS = [100, 300, 1000, 3000, 8000];
+const EQ_PRESETS = { Flat: [0, 0, 0, 0, 0], Voice: [-4, -1, 2, 4, 2], 'Less bass': [-8, -4, 0, 0, 0], 'More bass': [6, 3, 0, 0, 0], Treble: [0, 0, 0, 3, 6] };
+const eq = { ctx: null, src: null, nodes: [] };
+const hz = f => f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz';
+const db = v => (v > 0 ? '+' : '') + v + ' dB';
+const eqPreset = () => Object.keys(EQ_PRESETS).find(k => EQ_PRESETS[k].join() === state.pb.eq.join()) ?? '';
+const eqApply = () => eq.nodes.forEach((n, i) => { n.gain.value = state.pb.eq[i] ?? 0; });
+function eqConnect(a) {
+  eq.ctx ??= new AudioContext();
+  eq.src?.disconnect(); // the previous book's element
+  eq.nodes = EQ_BANDS.map((f, i) => { const n = eq.ctx.createBiquadFilter(); n.type = i === 0 ? 'lowshelf' : i === 4 ? 'highshelf' : 'peaking'; n.frequency.value = f; return n; });
+  eq.src = eq.ctx.createMediaElementSource(a);
+  [eq.src, ...eq.nodes].reduce((x, y) => x.connect(y)).connect(eq.ctx.destination);
+  eqApply();
+}
+const eqHtml = () => `<h2>Equalizer</h2><div class="card eq"><select id="eq-preset" aria-label="Equalizer preset"><option value="" hidden${eqPreset() ? '' : ' selected'}>Custom</option>${Object.keys(EQ_PRESETS).map(k => `<option${k === eqPreset() ? ' selected' : ''}>${k}</option>`).join('')}</select>
+${EQ_BANDS.map((f, i) => `<div class="eq-row"><span class="cap muted">${hz(f)}</span><input type="range" data-eq="${i}" min="-12" max="12" step="1" value="${state.pb.eq[i]}" aria-label="${hz(f)}" aria-valuetext="${db(state.pb.eq[i])}"><span class="cap muted" id="eq-v${i}">${db(state.pb.eq[i])}</span></div>`).join('')}</div>`;
 views.player = async () => {
   const s = player.s;
   const back = `<div><button class="lnk back" data-act="back">${svg('<path d="m6 9 6 6 6-6"/>', 16)}Collapse player</button></div>`;
@@ -330,7 +349,8 @@ views.player = async () => {
 <div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div>
 <div class="row g8" style="justify-content:center"><div class="chap"><button class="btn" id="pp-sleep" data-act="sleepmenu" aria-haspopup="true" aria-expanded="false">Sleep timer</button><div class="menu card wide" id="pp-sleepmenu" role="menu" hidden>${[[0, 'Off'], [15, '15 minutes'], [30, '30 minutes'], [45, '45 minutes'], ['chapter', 'End of chapter']].map(([v, l]) => `<button role="menuitem" data-act="sleep" data-v="${v}">${l}</button>`).join('')}</div></div><button class="btn" data-act="bookmark">Add bookmark</button></div></section>
 <div class="col g24 pp-side">${s.chapters.length ? `<section class="col g12"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
-<section class="col g12"><h2>Bookmarks</h2><div id="pp-bm">${bmHtml()}</div></section></div>
+<section class="col g12"><h2>Bookmarks</h2><div id="pp-bm">${bmHtml()}</div></section>
+<section class="col g12" id="pp-eq">${eqHtml()}</section></div>
 </div>`;
 };
 
@@ -626,7 +646,7 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
     if (local) {
       const srv = await client().play(id).catch(() => null);
       Object.assign(local, { local: true, sessionId: srv?.sessionId ?? null, start: srv?.start ?? local.start });
-    }
+    } else s.tracks = s.tracks.map(t => ({ ...t, url: T.core.convertFileSrc(t.url, 'stream') })); // through the app's relay, so the equalizer can hear it (stream.rs)
     if (!s.tracks.length) throw new Error('no audio');
     s.author = author; s.title = title;
     if (!state.pb.sync && store.get('pos.' + id) != null) s.start = store.get('pos.' + id); // not syncing: this computer's own place
@@ -639,8 +659,9 @@ async function startPlayer({ v: id, t: title, a: author }, autoplay = true) {
 <div class="np-ctl">${ib('prev', 'Previous chapter', svg(PL.prev, 24))}${ib('back', `Back ${state.pb.back} seconds`, skipIcon(state.pb.back, true))}${ib('toggle', 'Pause', svg(PL.pause, 24), 'main')}${ib('fwd', `Forward ${state.pb.fwd} seconds`, skipIcon(state.pb.fwd, false))}${ib('next', 'Next chapter', svg(PL.next, 24))}<div class="chap"><button class="ib txt" data-k="speed" id="np-rate" aria-haspopup="true" aria-expanded="false" aria-label="Playback speed">${player.rate}×</button><div class="menu card narrow" id="np-smenu" role="menu" hidden>${RATES.map(r => `<button role="menuitem" data-rate="${r}"${r === player.rate ? ' aria-current="true"' : ''}>${r}×</button>`).join('')}</div></div></div>
 <div class="vol"><button class="ib" data-k="mute" id="np-mute"></button><input type="range" id="np-vol" min="0" max="1" step="0.05" aria-label="Volume"></div>
 ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters" id="np-chapbtn" aria-haspopup="true" aria-expanded="false">${svg(PL.list, 20)}Chapters</button><div class="menu card" id="np-menu" role="menu" hidden>${s.chapters.map((c, i) => `<button role="menuitem" data-ch="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button>`).join('')}</div></div>` : ''}
-<audio id="audio"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
+<audio id="audio" crossorigin="anonymous"${autoplay ? ' autoplay' : ''} src="${esc(s.tracks[player.i].url)}"></audio>`;
     const a = audio();
+    eqConnect(a);
     a.defaultPlaybackRate = a.playbackRate = player.rate;
     paintVolume();
     el.querySelector('#np-vol').oninput = e => { player.vol = +e.target.value; player.muted = false; store.set('vol', player.vol); paintVolume(); };
@@ -659,6 +680,7 @@ ${s.chapters.length ? `<div class="chap"><button class="btn sm" data-k="chapters
       if (!el.querySelector('#np-seek:active')) paintPlayer();
     });
     a.addEventListener('play', () => {
+      eq.ctx?.resume(); // a context made without a click starts suspended, and the audio would play silently
       paintPlayer(); taskbarPlaying(true);
       if (state.pb.rewind && player.pausedAt && Date.now() - player.pausedAt > 60000) seek(position() - 10);
       player.pausedAt = null;
@@ -797,9 +819,17 @@ document.addEventListener('change', e => {
   if (e.target.id === 'sort') { state.sort = e.target.value; paintLib(); }
   if (e.target.id === 'upd-token') { store.set('ghtoken', e.target.value.trim()); if (state.upd.s === 'notoken') state.upd = { s: 'idle' }; paintUpd(); }
   if (e.target.id === 'dllimit') { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); dl?.pump(); }
+  if (e.target.id === 'eq-preset') { state.pb.eq = [...EQ_PRESETS[e.target.value]]; eqApply(); savePb(); document.getElementById('pp-eq').innerHTML = eqHtml(); }
+  if (e.target.dataset.eq) savePb();
   if (e.target.id === 'pb-sleep') { state.pb.sleep = e.target.value === 'chapter' ? 'chapter' : +e.target.value; savePb(); } if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
   if (e.target.id === 'pp-seek') { barFill(e); document.getElementById('pp-t0').textContent = clock(e.target.value); }
+  if (e.target.dataset.eq) {
+    const i = +e.target.dataset.eq, v = +e.target.value;
+    state.pb.eq[i] = v; eqApply();
+    document.getElementById('eq-v' + i).textContent = db(v); e.target.setAttribute('aria-valuetext', db(v));
+    document.getElementById('eq-preset').value = eqPreset();
+  }
   if (e.target.dataset.f) state.acct[e.target.dataset.f] = e.target.value;
   if (e.target.id === 'q') {
     state.q = e.target.value;

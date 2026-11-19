@@ -2,6 +2,7 @@
 
 #[cfg(windows)]
 mod taskbar;
+mod stream;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -153,6 +154,9 @@ fn main() {
                 let _ = w.hide();
             }
             _ => {}
+        })
+        .register_asynchronous_uri_scheme_protocol("stream", |_ctx, req, responder| {
+            tauri::async_runtime::spawn(async move { responder.respond(stream::proxy(req).await) });
         })
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
