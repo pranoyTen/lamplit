@@ -33,7 +33,7 @@ p{margin:0}
 .wbtn{width:46px;border:0;border-radius:0;background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;cursor:default}
 .wbtn:hover{color:var(--ink)}
 /* Mac: the three window dots on the left, their symbols show while the pointer is over the group */
-.lights{display:flex;align-items:center;gap:8px;padding:0 14px}
+.lights{display:flex;align-items:center;gap:8px;padding:0 16px}
 .dot{width:12px;height:12px;padding:0;border:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:rgba(0,0,0,.6);cursor:default}
 .dot.close{background:#ff5f57}.dot.min{background:#febc2e}.dot.max{background:#28c840}
 .dot svg{stroke-width:3;opacity:0}
@@ -46,7 +46,7 @@ p{margin:0}
 nav{width:240px;flex:none;overflow-y:auto;background:var(--s200);border-right:1px solid var(--hairline);padding:24px 16px;display:flex;flex-direction:column;gap:24px}
 .logo{font:600 22px/28px var(--serif);padding:0 8px}
 .navlinks{display:flex;flex-direction:column;gap:4px}
-.navlinks a{display:flex;align-items:center;gap:12px;height:36px;padding:0 8px 0 10px;border-radius:8px;color:var(--muted)}
+.navlinks a{display:flex;align-items:center;gap:12px;height:36px;padding:0 8px;border-radius:8px;color:var(--muted)}
 .navlinks a::before{content:"";width:2px;height:16px;border-radius:1px}
 .navlinks a[aria-current=page]{color:var(--ink);font-weight:500;padding-left:8px}
 .navlinks a[aria-current=page]::before{background:var(--brand)}
@@ -187,4 +187,4 @@ select{--chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' 
 select:hover{border-color:var(--border-strong)}
 select option{background:var(--raised);color:var(--ink)}
 .field select{background-color:var(--s200);width:200px;max-width:100%}
-kbd{padding:2px 10px;border:1px solid var(--border-strong);border-radius:4px;background:var(--s200);color:var(--ink);font:500 12px/20px var(--sans)}
+kbd{padding:2px 8px;border:1px solid var(--border-strong);border-radius:4px;background:var(--s200);color:var(--ink);font:500 12px/20px var(--sans)}
