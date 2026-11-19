@@ -12,6 +12,8 @@ export component MiniPlayer inherits Window {
     background: Theme.raised;
     default-font-family: Theme.sans;
     default-font-size: 14px;
+    in property <image> app-icon;
+    icon: root.app-icon;
 
     in property <bool> has-book;
     in property <string> book-title;

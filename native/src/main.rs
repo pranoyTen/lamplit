@@ -224,7 +224,17 @@ struct Offline {
 
 /// The tray icon as RGBA pixels, decoded from the PNG built into the exe.
 fn tray_icon() -> Option<Image> {
-    let mut d = png::Decoder::new(std::io::Cursor::new(include_bytes!("../ui/icons/tray.png")));
+    png_image(include_bytes!("../ui/icons/tray.png"))
+}
+
+/// The window icon (title bar, taskbar, Alt+Tab), decoded the same way.
+fn app_icon() -> Option<Image> {
+    png_image(include_bytes!("../icons/128x128.png"))
+}
+
+/// A PNG built into the exe as RGBA pixels: images embedded for the software renderer can't become window or tray icons.
+fn png_image(bytes: &[u8]) -> Option<Image> {
+    let mut d = png::Decoder::new(std::io::Cursor::new(bytes));
     d.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
     let mut r = d.read_info().ok()?;
     let mut buf = vec![0; r.output_buffer_size()?];
@@ -1149,6 +1159,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     });
 
+    if let Some(i) = app_icon() {
+        ui.set_app_icon(i);
+    }
     let theme = ui.global::<Theme>();
     theme.set_dark(prefs.dark);
     if !cfg!(windows) {
@@ -1327,6 +1340,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the mini player: left-click on the tray icon opens it beside the icon, a click anywhere else closes it
     let mini = MiniPlayer::new()?;
     mini.global::<Theme>().set_dark(prefs.dark);
+    if let Some(i) = app_icon() {
+        mini.set_app_icon(i);
+    }
     if !cfg!(windows) {
         mini.global::<Theme>().set_sans("".into());
     }
