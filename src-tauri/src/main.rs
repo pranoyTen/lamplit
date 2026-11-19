@@ -39,9 +39,9 @@ fn show_window(app: &tauri::AppHandle) {
     }
 }
 
-// The mini player: a small window shown under (or, with the tray at the bottom of the screen, above) the tray icon. It is made the first time
-// it is needed and then only hidden. It hides itself when it loses focus; a click on the icon that caused that is ignored for a moment so it
-// does not pop straight back open.
+// The mini player: a small window shown under (or, with the tray at the bottom of the screen, above) the tray icon. It is made each time it
+// opens and destroyed when it closes, because a hidden web view still holds about 170 MB. It closes when it loses focus; a click on the icon
+// that caused that is ignored for a moment so it does not pop straight back open.
 static MINI_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
 const MINI_W: f64 = 340.0;
 const MINI_H: f64 = 268.0;
@@ -65,18 +65,18 @@ fn mini(app: &tauri::AppHandle) -> Option<WebviewWindow> {
     if cfg!(target_os = "macos") {
         b = b.transparent(true).effects(WindowEffectsConfig { effects: vec![Effect::Popover], state: Some(EffectState::Active), radius: Some(12.0), color: None, interactive: false });
     }
-    b.build().ok()
+    b.build().map_err(|e| eprintln!("mini player: {e}")).ok()
 }
 
 fn toggle_mini(app: &tauri::AppHandle, icon: tauri::Rect) {
-    let Some(w) = mini(app) else { return };
-    if w.is_visible().unwrap_or(false) {
-        let _ = w.hide();
+    if let Some(w) = app.get_webview_window("mini") {
+        let _ = w.destroy();
         return;
     }
     if now_ms().saturating_sub(MINI_HIDDEN_AT.load(Ordering::Relaxed)) < 300 {
         return;
     }
+    let Some(w) = mini(app) else { return };
     let scale = w.scale_factor().unwrap_or(1.0);
     let (p, s) = (icon.position.to_physical::<f64>(scale), icon.size.to_physical::<f64>(scale));
     let (ww, wh) = (MINI_W * scale, MINI_H * scale);
@@ -97,7 +97,7 @@ fn toggle_mini(app: &tauri::AppHandle, icon: tauri::Rect) {
 #[tauri::command]
 fn show_main(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("mini") {
-        let _ = w.hide();
+        let _ = w.destroy();
     }
     show_window(&app);
 }
@@ -149,10 +149,18 @@ fn main() {
                 api.prevent_close();
                 let _ = w.hide();
             }
+            // while its web view starts, Windows reports the new window losing focus and getting it back in the same millisecond,
+            // so close only when it is still unfocused a moment later
             WindowEvent::Focused(false) if w.label() == "mini" => {
-                MINI_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
-                let _ = w.hide();
+                let w = w.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    if !w.is_focused().unwrap_or(false) {
+                        let _ = w.destroy();
+                    }
+                });
             }
+            WindowEvent::Destroyed if w.label() == "mini" => MINI_HIDDEN_AT.store(now_ms(), Ordering::Relaxed),
             _ => {}
         })
         .register_asynchronous_uri_scheme_protocol("stream", |_ctx, req, responder| {
