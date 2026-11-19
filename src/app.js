@@ -334,7 +334,7 @@ function eqConnect(a) {
   eqApply();
 }
 const eqHtml = () => `<h2>Equalizer</h2><div class="card eq"><select id="eq-preset" aria-label="Equalizer preset"><option value="" hidden${eqPreset() ? '' : ' selected'}>Custom</option>${Object.keys(EQ_PRESETS).map(k => `<option${k === eqPreset() ? ' selected' : ''}>${k}</option>`).join('')}</select>
-${EQ_BANDS.map((f, i) => `<div class="eq-row"><span class="cap muted">${hz(f)}</span><input type="range" data-eq="${i}" min="-12" max="12" step="1" value="${state.pb.eq[i]}" aria-label="${hz(f)}" aria-valuetext="${db(state.pb.eq[i])}"><span class="cap muted" id="eq-v${i}">${db(state.pb.eq[i])}</span></div>`).join('')}</div>`;
+<div class="eq-bands">${EQ_BANDS.map((f, i) => `<div class="eq-band"><span class="cap muted" id="eq-v${i}">${db(state.pb.eq[i])}</span><input type="range" data-eq="${i}" min="-12" max="12" step="1" value="${state.pb.eq[i]}" aria-label="${hz(f)}" aria-valuetext="${db(state.pb.eq[i])}"><span class="cap muted">${hz(f)}</span></div>`).join('')}</div></div>`;
 views.player = async () => {
   const s = player.s;
   const back = `<div><button class="lnk back" data-act="back">${svg('<path d="m6 9 6 6 6-6"/>', 16)}Collapse player</button></div>`;
