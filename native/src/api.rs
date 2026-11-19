@@ -1,4 +1,5 @@
 // Audiobookshelf REST client, the native counterpart of src/api.js. Blocking: callers run it off the UI thread.
+use crate::book::{Bookmark, Chapter};
 use serde_json::{json, Value};
 
 #[derive(Clone)]
@@ -27,6 +28,7 @@ pub struct Session {
     pub start: f64,
     pub duration: f64,
     pub tracks: Vec<Track>,
+    pub chapters: Vec<Chapter>,
 }
 
 fn base_of(server: &str) -> Result<String, String> {
@@ -94,7 +96,35 @@ impl Client {
         if tracks.is_empty() {
             return Err("This book has no audio".into());
         }
-        Ok(Session { id: s(&v["id"]), start: v["currentTime"].as_f64().unwrap_or(0.0), duration: v["duration"].as_f64().unwrap_or(0.0), tracks })
+        let duration = v["duration"].as_f64().unwrap_or(0.0);
+        let list = v["chapters"].as_array().cloned().unwrap_or_default();
+        let chapters = list.iter().enumerate()
+            .map(|(i, c)| {
+                let start = c["start"].as_f64().unwrap_or(0.0);
+                let end = c["end"].as_f64().or_else(|| list.get(i + 1).and_then(|n| n["start"].as_f64())).unwrap_or(duration);
+                Chapter { start, end: end.max(start + 1.0), title: s(&c["title"]) }
+            })
+            .collect();
+        Ok(Session { id: s(&v["id"]), start: v["currentTime"].as_f64().unwrap_or(0.0), duration, tracks, chapters })
+    }
+
+    /// This user's bookmarks in one book, in book order.
+    pub fn bookmarks(&self, id: &str) -> Result<Vec<Bookmark>, String> {
+        let me = self.call(reqwest::Method::GET, "/api/me", None)?;
+        let mut b: Vec<Bookmark> = me["bookmarks"].as_array().into_iter().flatten()
+            .filter(|b| b["libraryItemId"] == id)
+            .map(|b| Bookmark { time: b["time"].as_f64().unwrap_or(0.0), title: s(&b["title"]) })
+            .collect();
+        b.sort_by(|x, y| x.time.total_cmp(&y.time));
+        Ok(b)
+    }
+
+    pub fn add_bookmark(&self, id: &str, b: &Bookmark) -> Result<(), String> {
+        self.call(reqwest::Method::POST, &format!("/api/me/item/{id}/bookmark"), Some(json!({ "time": b.time, "title": b.title }))).map(|_| ())
+    }
+
+    pub fn remove_bookmark(&self, id: &str, time: f64) -> Result<(), String> {
+        self.call(reqwest::Method::DELETE, &format!("/api/me/item/{id}/bookmark/{time}"), None).map(|_| ())
     }
 
     /// Reports the place and the seconds listened since the last report; `close` ends the session.

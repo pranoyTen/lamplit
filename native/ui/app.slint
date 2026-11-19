@@ -3,8 +3,8 @@ import { Button, LineEdit, Slider, StandardListView, ComboBox, VerticalBox, Hori
 
 export component AppWindow inherits Window {
     title: "Lectern";
-    preferred-width: 720px;
-    preferred-height: 560px;
+    preferred-width: 1000px;
+    preferred-height: 680px;
 
     in property <bool> signed-in;
     in-out property <string> server;
@@ -14,13 +14,22 @@ export component AppWindow inherits Window {
     in property <string> message;
     in property <[StandardListViewItem]> books;
     in property <string> now-title;
+    in property <string> chapter-text;
     in property <bool> has-book;
+    in property <bool> has-chapters;
     in property <bool> playing;
-    in property <float> duration;
+    // the seek bar spans the current chapter (or the whole book when there are none); values are book time
+    in property <float> seek-min;
+    in property <float> seek-max;
     in-out property <float> position;
     in property <string> pos-text;
     in property <string> left-text;
+    in property <string> book-left;
     in-out property <bool> seeking; // the listener is dragging the bar, so the timer leaves it alone
+    in property <[StandardListViewItem]> chapters;
+    in property <[StandardListViewItem]> bookmarks;
+    in-out property <int> sleep-index;
+    in property <string> sleep-text;
 
     callback sign-in();
     callback sign-out();
@@ -29,6 +38,12 @@ export component AppWindow inherits Window {
     callback skip(float);
     callback seek(float);
     callback speed(string);
+    callback chapter-step(int);
+    callback pick-chapter(int);
+    callback pick-bookmark(int);
+    callback add-bookmark();
+    callback remove-bookmark(int);
+    callback sleep(int);
 
     VerticalBox {
         if !root.signed-in: VerticalBox {
@@ -44,42 +59,96 @@ export component AppWindow inherits Window {
             Text { text: "Books"; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
             Button { text: "Sign out"; clicked => { root.sign-out(); } }
         }
-        if root.signed-in: StandardListView {
-            vertical-stretch: 1;
-            model: root.books;
-            current-item-changed(i) => { root.pick(i); }
-        }
         if root.message != "": Text { text: root.message; wrap: word-wrap; }
-        VerticalBox {
-            visible: root.has-book;
-            height: root.has-book ? self.preferred-height : 0;
+        HorizontalBox {
             padding: 0;
-            Text { text: root.now-title; font-size: 16px; overflow: elide; }
-            Slider {
-                minimum: 0;
-                maximum: max(root.duration, 1);
-                value <=> root.position;
-                changed => { root.seeking = true; }
-                released(v) => {
-                    root.seeking = false;
-                    root.seek(v);
+            vertical-stretch: 1;
+            if root.signed-in: StandardListView {
+                width: root.has-book ? 34% : 100%;
+                model: root.books;
+                current-item-changed(i) => { root.pick(i); }
+            }
+            VerticalBox {
+                visible: root.has-book;
+                padding: 0;
+                Text { text: root.now-title; font-size: 16px; overflow: elide; }
+                Text { text: root.chapter-text; overflow: elide; }
+                Slider {
+                    minimum: root.seek-min;
+                    maximum: max(root.seek-max, root.seek-min + 1);
+                    value <=> root.position;
+                    changed => { root.seeking = true; }
+                    released(v) => {
+                        root.seeking = false;
+                        root.seek(v);
+                    }
                 }
-            }
-            HorizontalBox {
-                padding: 0;
-                Text { text: root.pos-text; horizontal-stretch: 1; }
-                Text { text: root.left-text; }
-            }
-            HorizontalBox {
-                padding: 0;
-                alignment: center;
-                Button { text: "Back 15"; clicked => { root.skip(-15); } }
-                Button { text: root.playing ? "Pause" : "Play"; primary: true; clicked => { root.toggle(); } }
-                Button { text: "Forward 30"; clicked => { root.skip(30); } }
-                ComboBox {
-                    model: ["0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"];
-                    current-index: 1;
-                    selected(v) => { root.speed(v); }
+                HorizontalBox {
+                    padding: 0;
+                    Text { text: root.pos-text; horizontal-stretch: 1; }
+                    Text { text: root.left-text; }
+                }
+                HorizontalBox {
+                    padding: 0;
+                    alignment: center;
+                    Button { text: "Previous"; enabled: root.has-chapters; clicked => { root.chapter-step(-1); } }
+                    Button { text: "Back 15"; clicked => { root.skip(-15); } }
+                    Button { text: root.playing ? "Pause" : "Play"; primary: true; clicked => { root.toggle(); } }
+                    Button { text: "Forward 30"; clicked => { root.skip(30); } }
+                    Button { text: "Next"; enabled: root.has-chapters; clicked => { root.chapter-step(1); } }
+                }
+                HorizontalBox {
+                    padding: 0;
+                    alignment: center;
+                    ComboBox {
+                        model: ["0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"];
+                        current-index: 1;
+                        selected(v) => { root.speed(v); }
+                    }
+                    ComboBox {
+                        model: ["Sleep: off", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "End of chapter"];
+                        current-index <=> root.sleep-index;
+                        selected => { root.sleep(root.sleep-index); }
+                    }
+                    Button { text: "Add bookmark"; clicked => { root.add-bookmark(); } }
+                }
+                HorizontalBox {
+                    padding: 0;
+                    Text { text: root.sleep-text; horizontal-stretch: 1; }
+                    Text { text: root.book-left; }
+                }
+                HorizontalBox {
+                    padding: 0;
+                    vertical-stretch: 1;
+                    VerticalBox {
+                        padding: 0;
+                        Text { text: "Chapters"; font-size: 14px; }
+                        StandardListView {
+                            model: root.chapters;
+                            // every click seeks, even on the row already selected
+                            item-pointer-event(i, e, p) => {
+                                if e.kind == PointerEventKind.up && e.button == PointerEventButton.left { root.pick-chapter(i); }
+                            }
+                        }
+                    }
+                    VerticalBox {
+                        padding: 0;
+                        Text { text: "Bookmarks"; font-size: 14px; }
+                        bm-list := StandardListView {
+                            model: root.bookmarks;
+                            item-pointer-event(i, e, p) => {
+                                if e.kind == PointerEventKind.up && e.button == PointerEventButton.left { root.pick-bookmark(i); }
+                            }
+                        }
+                        Button {
+                            text: "Remove selected bookmark";
+                            enabled: bm-list.current-item >= 0;
+                            clicked => {
+                                root.remove-bookmark(bm-list.current-item);
+                                bm-list.current-item = -1;
+                            }
+                        }
+                    }
                 }
             }
         }
