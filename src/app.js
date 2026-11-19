@@ -172,7 +172,7 @@ ${setrow('Download location', `${esc(state.dlcfg.dir ?? 'Lectern app data folder
   const keys = `<section class="col g12"><h2>Keyboard shortcuts</h2><div class="card panel">${[['Play or pause', ['Space']], ['Skip back or forward', ['Left', 'Right']], ['Volume up or down', ['Up', 'Down']]].map(([a, k]) => `<div class="setrow"><span>${a}</span><span class="row g4" style="flex-wrap:nowrap">${k.map(x => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div></section>`;
   const appearance = `<section class="col g12"><h2>Appearance</h2><div class="card panel">${setrow('Theme', 'Choose light or dark', 'th-light', `<div class="row g8" role="group" aria-label="Theme">${['light', 'dark'].map(t => `<button class="seg" id="th-${t}" data-act="settheme" data-v="${t}" aria-pressed="${state.theme === t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>`)}</div></section>`;
   const updates = `<section class="col g12"><h2>Updates</h2><div class="card panel"><div id="updstat">${updStatus()}</div>${setrow('GitHub token', 'Read-only access to the Lectern repository. Kept on this computer only', 'upd-token', `<input id="upd-token" type="password" autocomplete="off" placeholder="github_pat_…" value="${esc(store.get('ghtoken', ''))}">`)}</div></section>`;
-  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}${dls}${appearance}${updates}${keys}</div>`;
+  return `<h1>Settings</h1><div class="set"><section class="col g12"><h2>Server connection</h2><div class="card panel">${body}</div></section>${libs}${playbackSettings()}<section class="col g12" id="set-eq">${eqHtml()}</section>${dls}${appearance}${updates}${keys}</div>`;
 };
 // Settings > Updates: the status row repaints on its own so typing in the token field is not interrupted
 const UPD_TEXT = { idle: '', checking: 'Checking…', current: 'You have the latest version', notoken: 'Add a GitHub token below first' };
@@ -349,8 +349,7 @@ views.player = async () => {
 <div class="row g8" style="justify-content:center" role="group" aria-label="Playback speed">${RATES.map(r => `<button class="seg" data-act="prate" data-v="${r}" aria-pressed="false">${r}×</button>`).join('')}</div>
 <div class="row g8" style="justify-content:center"><div class="chap"><button class="btn" id="pp-sleep" data-act="sleepmenu" aria-haspopup="true" aria-expanded="false">Sleep timer</button><div class="menu card wide" id="pp-sleepmenu" role="menu" hidden>${[[0, 'Off'], [15, '15 minutes'], [30, '30 minutes'], [45, '45 minutes'], ['chapter', 'End of chapter']].map(([v, l]) => `<button role="menuitem" data-act="sleep" data-v="${v}">${l}</button>`).join('')}</div></div><button class="btn" data-act="bookmark">Add bookmark</button></div></section>
 <div class="col g24 pp-side">${s.chapters.length ? `<section class="col g12"><h2>Chapters</h2><ul class="plain card pp-chs" id="pp-chs">${s.chapters.map((c, i) => `<li><button data-act="pch" data-v="${i}"><span>${esc(c.title)}</span><span class="cap muted">${clock(c.start)}</span></button></li>`).join('')}</ul></section>` : ''}
-<section class="col g12"><h2>Bookmarks</h2><div id="pp-bm">${bmHtml()}</div></section>
-<section class="col g12" id="pp-eq">${eqHtml()}</section></div>
+<section class="col g12"><h2>Bookmarks</h2><div id="pp-bm">${bmHtml()}</div></section></div>
 </div>`;
 };
 
@@ -819,7 +818,7 @@ document.addEventListener('change', e => {
   if (e.target.id === 'sort') { state.sort = e.target.value; paintLib(); }
   if (e.target.id === 'upd-token') { store.set('ghtoken', e.target.value.trim()); if (state.upd.s === 'notoken') state.upd = { s: 'idle' }; paintUpd(); }
   if (e.target.id === 'dllimit') { state.dlcfg.limitGB = +e.target.value; store.set('dlcfg', state.dlcfg); dl?.pump(); }
-  if (e.target.id === 'eq-preset') { state.pb.eq = [...EQ_PRESETS[e.target.value]]; eqApply(); savePb(); document.getElementById('pp-eq').innerHTML = eqHtml(); }
+  if (e.target.id === 'eq-preset') { state.pb.eq = [...EQ_PRESETS[e.target.value]]; eqApply(); savePb(); document.getElementById('set-eq').innerHTML = eqHtml(); }
   if (e.target.dataset.eq) savePb();
   if (e.target.id === 'pb-sleep') { state.pb.sleep = e.target.value === 'chapter' ? 'chapter' : +e.target.value; savePb(); } if (e.target.id === 'pp-seek') seek(+e.target.dataset.start + +e.target.value); });
 document.addEventListener('input', e => {
