@@ -22,7 +22,7 @@ jobs:
           - os: macos-latest # Apple Silicon
             formats: app,dmg
             chip: aarch64
-          - os: macos-13 # Intel
+          - os: macos-15-intel # Intel (macos-13 was retired)
             formats: app,dmg
             chip: x64
     runs-on: ${{ matrix.os }}
