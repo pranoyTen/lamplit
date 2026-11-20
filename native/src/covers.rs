@@ -22,6 +22,41 @@ fn keep() -> usize {
     (BUDGET / (s * s * 4)).max(24)
 }
 
+const MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600); // then fetched again, in case the cover changed
+
+/// Where a book's cover is kept on disk, already squared to the screen size, so it isn't downloaded on every launch.
+fn file(id: &str) -> Option<std::path::PathBuf> {
+    let safe: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect(); // ids come from the server
+    Some(dirs::cache_dir()?.join("lectern-native").join("covers").join(safe + ".jpg"))
+}
+
+/// The cover from disk when it is there, fresh and the right size; otherwise from the server, saved for next time.
+/// Offline, an old saved copy is still better than none.
+fn load(client: &Client, id: &str, size: u32) -> Option<image::RgbaImage> {
+    let path = file(id);
+    let saved = path.as_ref().and_then(|p| image::open(p).ok()).map(|i| i.to_rgba8()).filter(|i| i.dimensions() == (size, size));
+    let fresh = path.as_ref().and_then(|p| p.metadata().ok()?.modified().ok()?.elapsed().ok()).is_some_and(|age| age < MAX_AGE);
+    if fresh && saved.is_some() {
+        return saved;
+    }
+    match client.cover(id, size) {
+        Ok(img) => {
+            if let Some(p) = &path {
+                let _ = save(p, &img);
+            }
+            Some(img)
+        }
+        Err(_) => saved,
+    }
+}
+
+fn save(path: &std::path::Path, img: &image::RgbaImage) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    let rgb = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8(); // jpeg has no alpha, and covers have none to lose
+    image::codecs::jpeg::JpegEncoder::new_with_quality(std::fs::File::create(path)?, 92).encode_image(&rgb)?;
+    Ok(())
+}
+
 type Job = (Client, String);
 type Done = Box<dyn Fn(String, Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>) + Send + Sync>;
 
@@ -45,7 +80,7 @@ impl Covers {
                     let mut jobs = cv.wait_while(lock.lock().unwrap(), |j| j.is_empty()).unwrap();
                     jobs.pop().unwrap()
                 };
-                let px = client.cover(&id, SIZE.load(Relaxed)).ok().map(|img| {
+                let px = load(&client, &id, SIZE.load(Relaxed)).map(|img| {
                     let (w, h) = img.dimensions();
                     slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(img.as_raw(), w, h)
                 });
@@ -107,5 +142,17 @@ impl Covers {
             self.order.remove(i);
         }
         self.order.push_back(id.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn saved_covers_come_back_and_stay_in_their_folder() {
+        assert!(super::file("../../evil").unwrap().ends_with("lectern-native/covers/evil.jpg"));
+        let p = std::env::temp_dir().join("lectern-cover-test.jpg");
+        super::save(&p, &image::RgbaImage::from_pixel(60, 60, image::Rgba([200, 100, 50, 255]))).unwrap();
+        assert_eq!(image::open(&p).unwrap().to_rgba8().dimensions(), (60, 60));
+        let _ = std::fs::remove_file(p);
     }
 }
