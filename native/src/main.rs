@@ -1204,18 +1204,25 @@ fn upd_status(busy: bool, status: &str, available: &str) {
     }
 }
 
-fn check_updates() {
+/// Quiet is the check at launch: it only speaks up when there is an update, and leaves errors (no token, offline) unsaid.
+fn check_updates(quiet: bool) {
     let token = with_app(|a| a.prefs.gh_token.clone());
-    upd_status(true, "Checking…", "");
-    background(move || updater::check(&token), |r| match r {
+    if quiet && token.is_empty() {
+        return;
+    }
+    if !quiet {
+        upd_status(true, "Checking…", "");
+    }
+    background(move || updater::check(&token), move |r| match r {
         Ok(Some(u)) => {
             let (v, notes) = (u.version.clone(), u.body.clone().unwrap_or_default());
             with_app(|a| a.update = Some(std::sync::Arc::new(u)));
             upd_status(false, &if notes.is_empty() { format!("Version {v} is available") } else { format!("Version {v} is available
 {notes}") }, &v);
         }
-        Ok(None) => upd_status(false, "You have the latest version", ""),
-        Err(e) => upd_status(false, &e, ""),
+        Ok(None) if !quiet => upd_status(false, "You have the latest version", ""),
+        Err(e) if !quiet => upd_status(false, &e, ""),
+        _ => {}
     });
 }
 
@@ -1459,7 +1466,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             save_prefs();
         }
     });
-    st.on_check_updates(check_updates);
+    st.on_check_updates(|| check_updates(false));
     st.on_install_update(install_update);
     st.set_default_speed(prefs.speed as f32);
     st.set_sleep_default(prefs.sleep);
@@ -1622,6 +1629,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => st.set_route("settings".into()),
     }
+    check_updates(true);
     // media keys need the window's handle, which exists once it is shown
     let controls = media::register(ui.window(), |e| {
         let _ = slint::invoke_from_event_loop(move || media_event(e));
