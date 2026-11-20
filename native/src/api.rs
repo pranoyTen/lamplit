@@ -279,8 +279,8 @@ impl Client {
     /// Covers are often taller than wide (400 × 730 is common); fitting the whole image into the square instead left it narrow, and
     /// the square slot then stretched it, which blurred it.
     pub fn cover(&self, id: &str, size: u32) -> Result<image::RgbaImage, String> {
-        // the original: asking the server for a width it doesn't have makes it upscale the image itself
-        let res = self.http.get(format!("{}/api/items/{id}/cover", self.base)).bearer_auth(&self.token).send().map_err(|e| e.to_string())?;
+        // raw=1 is the uploaded original; without it the server sends a 400 px webp, which is soft once shown at 150% scaling
+        let res = self.http.get(format!("{}/api/items/{id}/cover?raw=1", self.base)).bearer_auth(&self.token).send().map_err(|e| e.to_string())?;
         if !res.status().is_success() {
             return Err(format!("no cover ({})", res.status()));
         }
