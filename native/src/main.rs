@@ -1096,6 +1096,8 @@ fn tick(st: &State, tray: &Tray) {
         if slept {
             a.paused_at = Some(Instant::now());
         }
+        // the last 30 s of a sleep timer fade out; full volume again once it has paused, is turned off or is extended
+        a.out.set_volume(a.prefs.volume * book::fade(p.sleep.left(now_s(), &p.chapters, pos, a.speed)));
         st.set_sleep_text(match p.sleep {
             Sleep::Off => SharedString::new(),
             Sleep::At(at) => format!("Sleeping in {}", clock(at - now_s())).into(),
@@ -1154,6 +1156,14 @@ fn set_sleep(choice: i32) {
             5 => book::chapter_at(&p.chapters, p.engine.status.pos()).map_or(Sleep::Off, Sleep::ChapterEnd),
             _ => Sleep::Off,
         };
+    });
+}
+
+fn extend_sleep() {
+    with_app(|a| {
+        let speed = a.speed;
+        let Some(p) = a.playing.as_mut() else { return };
+        p.sleep = p.sleep.extended(now_s(), &p.chapters, p.engine.status.pos(), speed);
     });
 }
 
@@ -1524,6 +1534,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.on_add_bookmark(add_bookmark);
     st.on_remove_bookmark(|i| remove_bookmark(i as usize));
     st.on_sleep(set_sleep);
+    st.on_extend_sleep(extend_sleep);
 
     // closing the window only hides it (Slint's default) and playback goes on; the tray brings it back or quits
     let tray = Tray::new()?;
