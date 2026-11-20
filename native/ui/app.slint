@@ -125,6 +125,11 @@ export component AppWindow inherits Window {
                     spacing: 12px;
                     padding-left: 8px;
                     padding-right: 8px;
+                    // found by the check at launch; Settings has the notes and the install button
+                    if State.upd-available != "": HorizontalLayout {
+                        alignment: start;
+                        Btn { primary: true; small: true; text: "Update to " + State.upd-available; clicked => { State.route = "settings"; } }
+                    }
                     HorizontalLayout {
                         alignment: start;
                         Btn { icon: Icons.theme; text: "Theme: " + (Theme.dark ? "Dark" : "Light"); clicked => { State.toggle-theme(); } }
