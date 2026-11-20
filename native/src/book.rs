@@ -57,6 +57,32 @@ impl Sleep {
             Sleep::ChapterEnd(n) => chapters.get(n).is_some_and(|c| t >= c.end - 0.3),
         }
     }
+
+    /// Real seconds until the timer pauses (book time runs `speed` times faster), or None when it is off.
+    pub fn left(self, now: f64, chapters: &[Chapter], t: f64, speed: f64) -> Option<f64> {
+        match self {
+            Sleep::Off => None,
+            Sleep::At(at) => Some(at - now),
+            Sleep::ChapterEnd(n) => chapters.get(n).map(|c| (c.end - t) / speed.max(0.1)),
+        }
+    }
+
+    /// Ten more minutes: a timer moves out, and "end of chapter" becomes ten minutes after this chapter ends.
+    pub fn extended(self, now: f64, chapters: &[Chapter], t: f64, speed: f64) -> Sleep {
+        match self.left(now, chapters, t, speed) {
+            Some(left) => Sleep::At(now + left.max(0.0) + EXTEND),
+            None => Sleep::Off,
+        }
+    }
+}
+
+pub const EXTEND: f64 = 10.0 * 60.0;
+/// The volume fades out over the timer's last 30 seconds, so it doesn't cut off mid-sentence.
+pub const FADE: f64 = 30.0;
+
+/// How loud to play with this much of the timer left: 1 until the fade, then down to 0.
+pub fn fade(left: Option<f64>) -> f32 {
+    left.map_or(1.0, |l| (l / FADE).clamp(0.0, 1.0) as f32)
 }
 
 #[cfg(test)]
@@ -102,5 +128,18 @@ mod tests {
         assert!(!Sleep::ChapterEnd(0).due(0.0, &c, 99.0));
         assert!(Sleep::ChapterEnd(0).due(0.0, &c, 99.8));
         assert!(Sleep::ChapterEnd(0).due(0.0, &c, 120.0)); // a seek past the end still stops
+    }
+
+    #[test]
+    fn sleep_fades_and_extends() {
+        let c = book();
+        assert_eq!(fade(Sleep::Off.left(0.0, &c, 0.0, 1.0)), 1.0);
+        assert_eq!(fade(Sleep::At(100.0).left(0.0, &c, 0.0, 1.0)), 1.0);
+        assert_eq!(fade(Sleep::At(100.0).left(85.0, &c, 0.0, 1.0)), 0.5);
+        assert_eq!(fade(Sleep::At(100.0).left(120.0, &c, 0.0, 1.0)), 0.0);
+        assert_eq!(Sleep::ChapterEnd(0).left(0.0, &c, 40.0, 2.0), Some(30.0)); // 60 s of book at 2×
+        assert_eq!(Sleep::At(100.0).extended(40.0, &c, 0.0, 1.0), Sleep::At(700.0));
+        assert_eq!(Sleep::ChapterEnd(0).extended(10.0, &c, 40.0, 1.0), Sleep::At(10.0 + 60.0 + EXTEND));
+        assert_eq!(Sleep::Off.extended(0.0, &c, 0.0, 1.0), Sleep::Off);
     }
 }

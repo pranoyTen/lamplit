@@ -201,6 +201,7 @@ export component PlayerPage {
                     current-index <=> State.sleep-index;
                     selected => { State.sleep(State.sleep-index); }
                 }
+                if State.sleep-text != "": Btn { text: "+10 min"; small: true; clicked => { State.extend-sleep(); } }
                 Btn { text: "Add bookmark"; small: true; clicked => { State.add-bookmark(); } }
             }
             Muted { text: State.sleep-text != "" ? State.sleep-text + " · " + State.book-left : State.book-left; horizontal-alignment: center; font-size: 12px; }
