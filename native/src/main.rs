@@ -93,7 +93,7 @@ struct Prefs {
     rewind: bool,
     auto_next: bool,
     eq: [f32; 5],
-    gh_token: String, // shortcut: kept in the settings file like the Tauri app kept it; drop it once the repository is public
+    gh_token: String, // optional, only needed while the repository is private; shortcut: drop it once the repository is public
     speeds: HashMap<String, f64>, // a speed picked on the player for one book wins over the default `speed`
     sleep: i32,                   // the default sleep timer: 0 off, 1-3 for 15, 30 or 45 minutes, 4 end of chapter
     tray: bool,                   // closing the window keeps Lectern in the tray; off, closing quits
@@ -1214,12 +1214,9 @@ fn upd_status(busy: bool, status: &str, available: &str) {
     }
 }
 
-/// Quiet is the check at launch: it only speaks up when there is an update, and leaves errors (no token, offline) unsaid.
+/// Quiet is the check at launch: it only speaks up when there is an update, and leaves errors (like being offline) unsaid.
 fn check_updates(quiet: bool) {
     let token = with_app(|a| a.prefs.gh_token.clone());
-    if quiet && token.is_empty() {
-        return;
-    }
     if !quiet {
         upd_status(true, "Checking…", "");
     }

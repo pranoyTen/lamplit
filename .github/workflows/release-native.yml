@@ -91,7 +91,7 @@ jobs:
             native/dist/**/*.dmg
             native/dist/**/*.sig
 
-  # writes latest.json to the 'updates' branch, which installed copies check (the repo is private, so they read it with a token)
+  # writes latest.json to the 'updates' branch, which installed copies check at launch
   updates:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')

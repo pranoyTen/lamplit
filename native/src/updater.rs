@@ -1,6 +1,6 @@
 // Updates: reads latest.json from the repository's `updates` branch, and downloads and installs a newer signed release.
-// The repository is private for now, so both the check and the download send the user's GitHub token (Settings > Updates); the
-// signature check uses the same key as the Tauri app, so a release is only installed if it was signed by our release workflow.
+// A GitHub token (Settings > Updates) is optional: it is only needed while the repository is private. The signature check uses
+// the same key as the Tauri app, so a release is only installed if it was signed by our release workflow.
 use cargo_packager_updater::{semver::Version, url::Url, Config, Update, UpdaterBuilder};
 
 const ENDPOINT: &str = "https://raw.githubusercontent.com/pranoyTen/lectern/updates/latest.json";
@@ -13,25 +13,27 @@ pub fn current() -> &'static str {
 /// A newer release, or None when this is the latest.
 pub fn check(token: &str) -> Result<Option<Update>, String> {
     let token = token.trim();
-    if token.is_empty() {
-        return Err("Add a GitHub token below first".into());
-    }
     let version = Version::parse(current()).map_err(|e| e.to_string())?;
     // read the version first: an update file from an older release (a 1.x one from the Tauri app has no `format` fields, which the
     // updater requires) just means there is nothing newer, not an error
-    let res = reqwest::blocking::Client::new().get(ENDPOINT).bearer_auth(token).send().map_err(|_| "Can't reach GitHub. Check your connection".to_string())?;
+    let mut req = reqwest::blocking::Client::new().get(ENDPOINT);
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    let res = req.send().map_err(|_| "Can't reach GitHub. Check your connection".to_string())?;
     if !res.status().is_success() {
-        return Err("Couldn't read the update. Check that the token is valid and a release has been published".into());
+        return Err("Couldn't read the update. Check that a release has been published, and the token if you added one".into());
     }
     let manifest: serde_json::Value = res.json().map_err(|e| format!("Couldn't read the update: {e}"))?;
     if !is_newer(manifest["version"].as_str().unwrap_or_default(), &version) {
         return Ok(None);
     }
     let config = Config { endpoints: vec![Url::parse(ENDPOINT).unwrap()], pubkey: PUBKEY.trim().into(), windows: None };
-    let updater = UpdaterBuilder::new(version, config)
-        .header("Authorization", format!("Bearer {token}"))
-        .and_then(|b| b.build())
-        .map_err(explain)?;
+    let mut builder = UpdaterBuilder::new(version, config);
+    if !token.is_empty() {
+        builder = builder.header("Authorization", format!("Bearer {token}")).map_err(explain)?;
+    }
+    let updater = builder.build().map_err(explain)?;
     updater.check().map_err(explain)
 }
 
@@ -45,7 +47,7 @@ pub fn explain(e: cargo_packager_updater::Error) -> String {
     let m = e.to_string();
     let l = m.to_lowercase();
     if l.contains("401") || l.contains("403") || l.contains("404") {
-        "Couldn't read the update. Check that the token is valid and a release has been published".into()
+        "Couldn't read the update. Check that a release has been published, and the token if you added one".into()
     } else if l.contains("signature") {
         "The update's signature didn't match, so it wasn't installed".into()
     } else if l.contains("dns") || l.contains("connect") || l.contains("timed out") || l.contains("network") {
