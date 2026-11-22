@@ -346,17 +346,6 @@ export component SettingsPage {
                         if State.upd-available == "": Btn { text: "Check for updates"; enabled: !State.upd-busy; clicked => { State.check-updates(); } }
                         if State.upd-available != "": Btn { primary: true; text: "Update and restart"; enabled: !State.upd-busy; clicked => { State.install-update(); } }
                     }
-                    SetRow {
-                        label: "GitHub token";
-                        desc: "Optional. Only needed while the repository is private. Kept on this computer only";
-                        LineEdit {
-                            width: 280px;
-                            placeholder-text: "github_pat_…";
-                            input-type: InputType.password;
-                            text <=> State.gh-token;
-                            edited => { State.save-token(); }
-                        }
-                    }
                 }
 
                 Section {
