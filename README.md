@@ -67,7 +67,7 @@ Then open Lectern, enter your server address, username and password, and your li
 
 ### Updates
 
-The repository is private, so the updater needs a GitHub token to read releases. In **Settings › Updates**, add a fine-grained token with read-only access to the Lectern repository's contents. It stays on your computer. Lectern then checks for updates at every launch.
+Lectern checks for a new release at every launch and offers to install it from the sidebar. You can also check in **Settings › Updates**.
 
 ## Building from source
 
@@ -105,3 +105,9 @@ The workflow builds Windows and both Mac versions, signs the update files, attac
 | `native/ui` | The interface, in Slint |
 | `native/icons` | App and tray icons |
 | `scripts`, `tests` | Builds the update information for each release, and its tests |
+
+## License
+
+Lectern is free software under the [GNU General Public License v3.0](LICENSE). You can use, change and share it, and if you share a changed version, you share its source under the same license.
+
+The interface is built with [Slint](https://slint.dev/), used under its GPL-3.0 license.

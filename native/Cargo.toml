@@ -3,6 +3,7 @@ name = "lectern-native"
 version = "2.0.0"
 edition = "2024"
 description = "Audiobookshelf player"
+license = "GPL-3.0-only"
 
 # lectern.exe, like the Tauri app, so an installed 1.x is updated in place
 [[bin]]

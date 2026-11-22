@@ -1,5 +1,5 @@
-// Builds the updater's latest.json for a release. The repo is private, so each file is addressed by its GitHub API asset URL
-// (the app downloads it with a token). Run in CI: node scripts/latest-json.js v1.2.0 > latest.json
+// Builds the updater's latest.json for a release. Each file is addressed by its GitHub API asset URL, which also works with a token
+// while the repository is private. Run in CI: node scripts/latest-json.js v1.2.0 > latest.json
 const { execFileSync } = require('node:child_process');
 
 // `format` tells the native app's updater (cargo-packager-updater) how to install the file; the Tauri updater ignores it.

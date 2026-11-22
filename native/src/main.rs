@@ -93,7 +93,6 @@ struct Prefs {
     rewind: bool,
     auto_next: bool,
     eq: [f32; 5],
-    gh_token: String, // shortcut: kept in the settings file like the Tauri app kept it; drop it once the repository is public
     speeds: HashMap<String, f64>, // a speed picked on the player for one book wins over the default `speed`
     sleep: i32,                   // the default sleep timer: 0 off, 1-3 for 15, 30 or 45 minutes, 4 end of chapter
     tray: bool,                   // closing the window keeps Lectern in the tray; off, closing quits
@@ -107,7 +106,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Prefs {
             dark: false, speed: 1.0, folder: None, limit_gb: 10, auto_remove: false, back: 15, fwd: 30, rewind: true, auto_next: true,
-            eq: [0.0; 5], gh_token: String::new(), speeds: HashMap::new(), sleep: 0, tray: true, sync: true, metered: false,
+            eq: [0.0; 5], speeds: HashMap::new(), sleep: 0, tray: true, sync: true, metered: false,
             hidden_libs: vec![], volume: 1.0,
         }
     }
@@ -1214,16 +1213,12 @@ fn upd_status(busy: bool, status: &str, available: &str) {
     }
 }
 
-/// Quiet is the check at launch: it only speaks up when there is an update, and leaves errors (no token, offline) unsaid.
+/// Quiet is the check at launch: it only speaks up when there is an update, and leaves errors (like being offline) unsaid.
 fn check_updates(quiet: bool) {
-    let token = with_app(|a| a.prefs.gh_token.clone());
-    if quiet && token.is_empty() {
-        return;
-    }
     if !quiet {
         upd_status(true, "Checking…", "");
     }
-    background(move || updater::check(&token), move |r| match r {
+    background(updater::check, move |r| match r {
         Ok(Some(u)) => {
             let (v, notes) = (u.version.clone(), u.body.clone().unwrap_or_default());
             with_app(|a| a.update = Some(std::sync::Arc::new(u)));
@@ -1468,14 +1463,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.on_open_series(|id| open_series(id.to_string()));
     st.on_show_stats(show_stats);
     st.set_version(updater::current().into());
-    st.set_gh_token(prefs.gh_token.clone().into());
-    st.on_save_token(|| {
-        if let Some(ui) = window() {
-            let t = ui.global::<State>().get_gh_token().trim().to_string();
-            with_app(|a| a.prefs.gh_token = t);
-            save_prefs();
-        }
-    });
     st.on_check_updates(|| check_updates(false));
     st.on_install_update(install_update);
     st.set_default_speed(prefs.speed as f32);

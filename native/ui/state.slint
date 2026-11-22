@@ -215,11 +215,9 @@ export global State {
 
     // updates
     in property <string> version;
-    in-out property <string> gh-token;
     in property <string> upd-status;
     in property <bool> upd-busy;
     in property <string> upd-available; // the newer version, or "" when there is none
-    callback save-token();
     callback check-updates();
     callback install-update();
 
