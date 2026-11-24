@@ -124,7 +124,9 @@ export global State {
     in property <string> book-left;
     in property <float> speed: 1;
     in property <[ListRow]> chapters;
+    in property <int> chapter-index: -1; // the one playing
     in property <[ListRow]> bookmarks;
+    in-out property <float> volume: 1;
     in-out property <int> sleep-index;
     in property <string> sleep-text;
     in property <int> back-secs: 15;
@@ -212,6 +214,9 @@ export global State {
     callback set-metered(bool);
     callback use-default-folder();
     callback volume-step(float);
+    callback set-volume(float);
+    callback save-volume();
+    pure callback clock(float) -> string; // seconds as 1:02:03
 
     // updates
     in property <string> version;

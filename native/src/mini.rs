@@ -10,7 +10,7 @@ mod imp {
         GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
     };
 
-    fn hwnd(w: &slint::Window) -> Option<HWND> {
+    pub fn hwnd(w: &slint::Window) -> Option<HWND> {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         match w.window_handle().window_handle().ok()?.as_raw() {
             RawWindowHandle::Win32(h) => Some(h.hwnd.get() as HWND),
