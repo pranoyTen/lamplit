@@ -39,7 +39,7 @@ component NavItem inherits Clickable {
 }
 
 export component AppWindow inherits Window {
-    title: "Lectern";
+    title: "Lamplit";
     preferred-width: 1180px;
     preferred-height: 780px;
     min-width: 940px; // what the player bar needs
@@ -91,7 +91,7 @@ export component AppWindow inherits Window {
                 spacing: 24px;
                 HorizontalLayout {
                     padding-left: 8px;
-                    Text { text: "Lectern"; font-family: Theme.serif; font-weight: 600; font-size: 22px; color: Theme.ink; }
+                    Text { text: "Lamplit"; font-family: Theme.serif; font-weight: 600; font-size: 22px; color: Theme.ink; }
                 }
                 VerticalLayout {
                     spacing: 4px;
@@ -176,7 +176,7 @@ export component AppWindow inherits Window {
 export component Tray inherits SystemTrayIcon {
     in property <image> image; // set from Rust as plain pixels: an image embedded for the software renderer cannot become a tray icon
     icon: root.image;
-    tooltip: "Lectern";
+    tooltip: "Lamplit";
     in property <bool> has-book;
     in property <bool> playing;
     callback show-window();
@@ -185,7 +185,7 @@ export component Tray inherits SystemTrayIcon {
     callback quit();
     clicked => { root.show-mini(); }
     Menu {
-        MenuItem { title: "Show Lectern"; activated => { root.show-window(); } }
+        MenuItem { title: "Show Lamplit"; activated => { root.show-window(); } }
         MenuItem { title: root.playing ? "Pause" : "Play"; enabled: root.has-book; activated => { root.toggle(); } }
         MenuItem { title: "Quit"; activated => { root.quit(); } }
     }

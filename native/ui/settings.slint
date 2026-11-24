@@ -242,7 +242,7 @@ export component SettingsPage {
                     }
                     SetRow {
                         label: "Keep playing when the window is closed";
-                        desc: "Closing hides Lectern in the system tray. Quit from the tray icon";
+                        desc: "Closing hides Lamplit in the system tray. Quit from the tray icon";
                         Toggle { checked <=> State.tray; toggled => { State.set-tray(self.checked); } }
                     }
                 }

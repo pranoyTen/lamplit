@@ -4,7 +4,7 @@ import { Theme, ThemeSync } from "theme.slint";
 import { Icons, IconBtn, Btn, Bar, Cover, Muted } from "widgets.slint";
 
 export component MiniPlayer inherits Window {
-    title: "Lectern";
+    title: "Lamplit";
     no-frame: true;
     always-on-top: true;
     width: 340px;
@@ -87,7 +87,7 @@ export component MiniPlayer inherits Window {
         }
         HorizontalLayout {
             alignment: center;
-            Btn { small: true; text: "Open Lectern"; clicked => { root.open-main(); } }
+            Btn { small: true; text: "Open Lamplit"; clicked => { root.open-main(); } }
         }
     }
 }

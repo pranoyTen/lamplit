@@ -1,26 +1,41 @@
 [package]
-name = "lectern-native"
+name = "lamplit"
 version = "2.0.3"
 edition = "2024"
 description = "Audiobookshelf player"
 license = "GPL-3.0-only"
 
-# lectern.exe, like the Tauri app, so an installed 1.x is updated in place
 [[bin]]
-name = "lectern"
+name = "lamplit"
 path = "src/main.rs"
 
-# installers built by cargo-packager (in the release workflow): NSIS on Windows, an app bundle and a dmg on a Mac. The product name
-# and identifier match the Tauri app's, so they install over it.
+# installers built by cargo-packager (in the release workflow): NSIS on Windows, an app bundle and a dmg on a Mac.
 [package.metadata.packager]
-product-name = "Lectern"
-identifier = "app.lectern.desktop"
-publisher = "Lectern"
+product-name = "Lamplit"
+identifier = "app.lamplit.desktop"
+publisher = "Lamplit"
 before-packaging-command = "cargo build --release"
 binaries-dir = "target/release"
 out-dir = "dist"
-binaries = [{ path = "lectern", main = true }]
+binaries = [{ path = "lamplit", main = true }]
 icons = ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+
+# the app was called Lectern up to 2.0.3: its own uninstaller removes that copy (never settings or downloads). Another project's app is
+# also called Lectern, so this only runs for the one our installer registered.
+[package.metadata.packager.nsis]
+preinstall-section = '''
+Section "RemoveLectern"
+  ReadRegStr $0 HKCU "Software\Lectern\Lectern" ""
+  ReadRegStr $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lectern" "Publisher"
+  ${If} $0 != ""
+  ${AndIf} $1 == "Lectern"
+  ${AndIf} ${FileExists} "$0\uninstall.exe"
+    ExecWait '"$0\uninstall.exe" /S _?=$0'
+    Delete "$0\uninstall.exe"
+    RMDir "$0"
+  ${EndIf}
+SectionEnd
+'''
 
 [dependencies]
 cargo-packager-updater = "0.2.3"

@@ -2,7 +2,7 @@
 // The signature check uses the same key as the Tauri app, so a release is only installed if it was signed by our release workflow.
 use cargo_packager_updater::{semver::Version, url::Url, Config, Update, UpdaterBuilder};
 
-const ENDPOINT: &str = "https://raw.githubusercontent.com/pranoyTen/lectern/updates/latest.json";
+const ENDPOINT: &str = "https://raw.githubusercontent.com/pranoyTen/lamplit/updates/latest.json";
 const PUBKEY: &str = include_str!("../updater.pub");
 
 pub fn current() -> &'static str {

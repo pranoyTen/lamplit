@@ -1,15 +1,17 @@
-# Lectern
+# Lamplit
 
 > [!NOTE]
-> **How Lectern is made:** I built Lectern for my own listening and share it in case it's useful to you. Because it started as a personal tool, most of the code is written with Claude Code rather than by hand. I choose every feature, read every diff before it's merged, and use each change in the app myself before it goes into a release.
+> **How Lamplit is made:** I built Lamplit for my own listening and share it in case it's useful to you. Because it started as a personal tool, most of the code is written with Claude Code rather than by hand. I choose every feature, read every diff before it's merged, and use each change in the app myself before it goes into a release.
 
-Lectern is a Windows and Mac app for listening to your own [Audiobookshelf](https://www.audiobookshelf.org/) library. It streams or downloads your books and keeps your place in sync with every other device you listen on.
+Lamplit is a Windows and Mac app for listening to your own [Audiobookshelf](https://www.audiobookshelf.org/) library. It streams or downloads your books and keeps your place in sync with every other device you listen on.
 
 It is written in Rust with [Slint](https://slint.dev/) and has no web view inside, so it uses about 20 to 45 MB of memory while playing, where the earlier web-based version used about 400 MB.
 
-<!-- Screenshot of Home goes here, e.g. ![Lectern's Home screen](docs/home.png) -->
+<!-- Screenshot of Home goes here, e.g. ![Lamplit's Home screen](docs/home.png) -->
 
-Lectern is not affiliated with the Audiobookshelf project. It is an independent client and needs an Audiobookshelf server to connect to.
+Lamplit was called Lectern up to version 2.0.3. It has no connection to [the other Audiobookshelf client named Lectern](https://github.com/majorpaynedof/lectern).
+
+Lamplit is not affiliated with the Audiobookshelf project. It is an independent client and needs an Audiobookshelf server to connect to.
 
 ## Features
 
@@ -46,7 +48,7 @@ Lectern is not affiliated with the Audiobookshelf project. It is an independent 
 
 **Desktop**
 - Media keys and the system's now playing controls (the Windows media flyout and macOS Now Playing)
-- System tray icon with a mini player; closing the window keeps Lectern playing in the tray
+- System tray icon with a mini player; closing the window keeps Lamplit playing in the tray
 - Keyboard shortcuts: Space to play or pause, Left and Right to skip, Up and Down for volume
 - Light and dark themes
 - Updates itself: checks at launch and installs with one click
@@ -57,25 +59,25 @@ Download the installer for your system from the [latest release](../../releases/
 
 | System | File |
 | --- | --- |
-| Windows 10 and 11 | `lectern_<version>_x64-setup.exe` |
-| macOS on Apple silicon | `Lectern_aarch64.dmg` |
-| macOS on Intel | `Lectern_x64.dmg` |
+| Windows 10 and 11 | `lamplit_<version>_x64-setup.exe` |
+| macOS on Apple silicon | `Lamplit_aarch64.dmg` |
+| macOS on Intel | `Lamplit_x64.dmg` |
 
-The installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn the first time you open them. On Windows choose **More info › Run anyway**. On a Mac, try to open Lectern once, then go to **System Settings › Privacy & Security** and choose **Open Anyway**.
+The installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn the first time you open them. On Windows choose **More info › Run anyway**. On a Mac, try to open Lamplit once, then go to **System Settings › Privacy & Security** and choose **Open Anyway**.
 
-Then open Lectern, enter your server address, username and password, and your libraries appear.
+Then open Lamplit, enter your server address, username and password, and your libraries appear.
 
 ### Updates
 
-Lectern checks for a new release at every launch and offers to install it from the sidebar. You can also check in **Settings › Updates**.
+Lamplit checks for a new release at every launch and offers to install it from the sidebar. You can also check in **Settings › Updates**.
 
 ## Building from source
 
 You need [Rust](https://rustup.rs/) (stable). Windows and macOS are the supported systems; Linux may build (it needs the ALSA development package, `libasound2-dev` on Debian and Ubuntu) but isn't tested.
 
 ```sh
-git clone https://github.com/pranoyTen/lectern.git
-cd lectern/native
+git clone https://github.com/pranoyTen/lamplit.git
+cd lamplit/native
 cargo run --release
 ```
 
@@ -108,6 +110,6 @@ The workflow builds Windows and both Mac versions, signs the update files, attac
 
 ## License
 
-Lectern is free software under the [GNU General Public License v3.0](LICENSE). You can use, change and share it, and if you share a changed version, you share its source under the same license.
+Lamplit is free software under the [GNU General Public License v3.0](LICENSE). You can use, change and share it, and if you share a changed version, you share its source under the same license.
 
 The interface is built with [Slint](https://slint.dev/), used under its GPL-3.0 license.
