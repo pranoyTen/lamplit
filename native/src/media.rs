@@ -18,7 +18,7 @@ pub fn register(window: &slint::Window, on_event: impl Fn(MediaControlEvent) + S
         let _ = window;
         None
     };
-    let config = PlatformConfig { display_name: "Lectern", dbus_name: "lectern", hwnd };
+    let config = PlatformConfig { display_name: "Lamplit", dbus_name: "lamplit", hwnd };
     let mut c = MediaControls::new(config).map_err(|e| eprintln!("media keys unavailable: {e:?}")).ok()?;
     c.attach(on_event).map_err(|e| eprintln!("media keys unavailable: {e:?}")).ok()?;
     Some(c)

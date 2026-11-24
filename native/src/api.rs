@@ -291,7 +291,7 @@ impl Client {
 
     /// Opens a playback session: where the server last left off, and the audio files in play order.
     pub fn play(&self, id: &str) -> Result<Session, String> {
-        let body = json!({ "deviceInfo": { "clientName": "Lectern" }, "forceDirectPlay": true,
+        let body = json!({ "deviceInfo": { "clientName": "Lamplit" }, "forceDirectPlay": true,
             "supportedMimeTypes": ["audio/mpeg", "audio/mp4", "audio/flac", "audio/ogg"] });
         let v = self.call(reqwest::Method::POST, &format!("/api/items/{id}/play"), Some(body))?;
         let tracks = v["audioTracks"].as_array().into_iter().flatten()

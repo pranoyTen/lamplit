@@ -1,4 +1,4 @@
-// The Back, Play/Pause and Forward buttons under Lectern's preview when the mouse rests on its taskbar icon. Windows only.
+// The Back, Play/Pause and Forward buttons under Lamplit's preview when the mouse rests on its taskbar icon. Windows only.
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(windows), allow(dead_code))]

@@ -1,4 +1,4 @@
-// Lectern, native: the Slint screens over the playback core. Network calls run on worker threads and hand their results back to the UI
+// Lamplit, native: the Slint screens over the playback core. Network calls run on worker threads and hand their results back to the UI
 // thread with invoke_from_event_loop; everything the UI owns lives in APP on that thread.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod api;
@@ -96,7 +96,7 @@ struct Prefs {
     eq: [f32; 5],
     speeds: HashMap<String, f64>, // a speed picked on the player for one book wins over the default `speed`
     sleep: i32,                   // the default sleep timer: 0 off, 1-3 for 15, 30 or 45 minutes, 4 end of chapter
-    tray: bool,                   // closing the window keeps Lectern in the tray; off, closing quits
+    tray: bool,                   // closing the window keeps Lamplit in the tray; off, closing quits
     sync: bool,                   // off: no progress reports, and books start where this computer left them
     metered: bool,                // download on metered connections too
     hidden_libs: Vec<String>,
@@ -193,6 +193,7 @@ fn say(msg: impl Into<SharedString>) {
 // ---- saved between runs ----
 // shortcut: the token sits in a plain file in the user's config folder, as it did in the Tauri app's local storage; move it to the OS
 // keychain (keyring crate) before release
+// (the folders are still called lectern-native, the name before Lamplit, so sign-ins, settings and downloads carry over)
 fn config_dir() -> Option<std::path::PathBuf> {
     Some(dirs::config_dir()?.join("lectern-native"))
 }
@@ -1253,7 +1254,7 @@ fn install_update() {
     background(move || updater::install(&u).map(|_| u), |r| match r {
         Ok(_) => {
             if cfg!(target_os = "macos") {
-                // …/Lectern.app/Contents/MacOS/lectern → …/Lectern.app
+                // …/Lamplit.app/Contents/MacOS/lamplit → …/Lamplit.app
                 if let Some(app) = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(3).map(|a| a.to_path_buf())) {
                     let _ = std::process::Command::new("open").arg("-n").arg(app).spawn();
                 }
@@ -1628,7 +1629,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     ui.show()?;
-    // closing the window hides it and Lectern keeps playing from the tray, unless that is turned off in Settings
+    // closing the window hides it and Lamplit keeps playing from the tray, unless that is turned off in Settings
     ui.window().on_close_requested(|| {
         if !with_app(|a| a.prefs.tray) {
             let _ = slint::quit_event_loop();
