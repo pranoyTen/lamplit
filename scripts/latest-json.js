@@ -14,7 +14,8 @@ function latestJson({ tag, notes, repo, assets, sigs }) {
   const perChip = assets.some(x => x.name.endsWith('_aarch64.app.tar.gz'));
   const arm = find(perChip ? '_aarch64.app.tar.gz' : '.app.tar.gz', 'app');
   const intel = perChip ? find('_x64.app.tar.gz', 'app') : arm;
-  return { version: tag.replace(/^v/, ''), notes: notes ?? '', pub_date: new Date().toISOString(), platforms: { 'windows-x86_64': win, 'darwin-aarch64': arm, 'darwin-x86_64': intel } };
+  // the native updater calls a Mac 'macos', the Tauri app (1.x) calls it 'darwin'
+  return { version: tag.replace(/^v/, ''), notes: notes ?? '', pub_date: new Date().toISOString(), platforms: { 'windows-x86_64': win, 'macos-aarch64': arm, 'macos-x86_64': intel, 'darwin-aarch64': arm, 'darwin-x86_64': intel } };
 }
 
 if (require.main === module) {
