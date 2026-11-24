@@ -24,6 +24,8 @@ test('a native (2.x) release gives each Mac chip its own build', () => {
   assert.equal(j.platforms['darwin-aarch64'].url, 'https://api.github.com/repos/me/lectern/releases/assets/23');
   assert.equal(j.platforms['darwin-x86_64'].url, 'https://api.github.com/repos/me/lectern/releases/assets/25');
   assert.equal(j.platforms['darwin-x86_64'].signature, 'I');
+  assert.deepEqual(j.platforms['macos-aarch64'], j.platforms['darwin-aarch64']); // the names the native updater looks up
+  assert.deepEqual(j.platforms['macos-x86_64'], j.platforms['darwin-x86_64']);
 });
 
 test('a missing signed file fails the build instead of publishing a broken update', () => {
