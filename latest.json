@@ -1,0 +1,32 @@
+{
+  "version": "2.1.0",
+  "notes": "Download the installer for your system below. The installers are not code-signed, so Windows and macOS will warn the first time you open them.",
+  "pub_date": "2026-11-24T20:47:54.717Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVRNFFucXFZWE5McmE3V1d4TWpicS81VXF1cC9YamNjMmk1aHJMR1BUZ2Y5N2lGRk1SZ3phZkZUZFk3b2VRckZpTEhSdGJLOFZXK1Z0WVlxRmFhTXFmbWlnaGZaR0ZKOWdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUyOTAyCWZpbGU6bGFtcGxpdF8yLjEuMF94NjQtc2V0dXAuZXhlCmpBaWoxZjZCTDV6aWhGSWJXNElwcU1wNnFIV0N6WHYrVk9CU2tWUUxDRjNtTDhoZnc0Mm11RmtwWUs5dVJ1Smswc1Mrc3AvV2t1WldLVGl3eFBObERRPT0K",
+      "url": "https://api.github.com/repos/pranoyTen/lamplit/releases/assets/788782072",
+      "format": "nsis"
+    },
+    "macos-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVRNFFucXFZWE5MclJWQXlOYjZHQTExd2syTjZMa2tGM3M1UXEydUZjOE5zNW5MZGN5M3EwQ0VHNG1HWTVUSnk2TVprL1ZOMysrZ3pxandkSGJoM3VjN3o3OFNGTlpzQ0FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUyNDkwCWZpbGU6TGFtcGxpdC5hcHAudGFyLmd6CmcwZ1A1UWVWdnFmS0s3UGJxL1UxRHZBejkzNWQ1Mmd1VHN2V0tiSkFlOTRCcVFiQXpBLzdFWTJhbDRnWW9HZWZERjRKcTV6RnhEbG56T1lETFJEaUNBPT0K",
+      "url": "https://api.github.com/repos/pranoyTen/lamplit/releases/assets/788759467",
+      "format": "app"
+    },
+    "macos-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVRNFFucXFZWE5McmVyazBUaXVlK1lFclArZ05yK2FYbTlIaHpCejBRbitqZHNUcDZBam13dnoyYW5DN2pMdkM2Y0dXTkZKVUhOeEU1aSs5b0xSMXk1b0VhZUY1MC83aEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUzMTIzCWZpbGU6TGFtcGxpdC5hcHAudGFyLmd6CjVZejAyRFhJRHNCSnRFUHFOWDhZMXZSdVU2L2czM0g3TGVhWUt5TG1nK2tlTXdnNHE5eVZDWDNzQVN6UzJUQjBXZnJBSzhvOTU0dC9MSG1ua2daZERRPT0K",
+      "url": "https://api.github.com/repos/pranoyTen/lamplit/releases/assets/788793086",
+      "format": "app"
+    },
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVRNFFucXFZWE5MclJWQXlOYjZHQTExd2syTjZMa2tGM3M1UXEydUZjOE5zNW5MZGN5M3EwQ0VHNG1HWTVUSnk2TVprL1ZOMysrZ3pxandkSGJoM3VjN3o3OFNGTlpzQ0FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUyNDkwCWZpbGU6TGFtcGxpdC5hcHAudGFyLmd6CmcwZ1A1UWVWdnFmS0s3UGJxL1UxRHZBejkzNWQ1Mmd1VHN2V0tiSkFlOTRCcVFiQXpBLzdFWTJhbDRnWW9HZWZERjRKcTV6RnhEbG56T1lETFJEaUNBPT0K",
+      "url": "https://api.github.com/repos/pranoyTen/lamplit/releases/assets/788759467",
+      "format": "app"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVRNFFucXFZWE5McmVyazBUaXVlK1lFclArZ05yK2FYbTlIaHpCejBRbitqZHNUcDZBam13dnoyYW5DN2pMdkM2Y0dXTkZKVUhOeEU1aSs5b0xSMXk1b0VhZUY1MC83aEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUzMTIzCWZpbGU6TGFtcGxpdC5hcHAudGFyLmd6CjVZejAyRFhJRHNCSnRFUHFOWDhZMXZSdVU2L2czM0g3TGVhWUt5TG1nK2tlTXdnNHE5eVZDWDNzQVN6UzJUQjBXZnJBSzhvOTU0dC9MSG1ua2daZERRPT0K",
+      "url": "https://api.github.com/repos/pranoyTen/lamplit/releases/assets/788793086",
+      "format": "app"
+    }
+  }
+}
