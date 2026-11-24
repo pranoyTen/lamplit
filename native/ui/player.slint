@@ -9,6 +9,29 @@ export global Speeds {
     out property <[float]> all: [0.75, 1, 1.25, 1.5, 1.75, 2];
 }
 
+// the time under the pointer on a seek bar, over the chapter's length; `at` is how far along the bar, 0 to 1
+component SeekTip inherits Rectangle {
+    in property <float> at;
+    in property <length> bar-width;
+    property <float> total: max(0, State.seek-max - State.seek-min);
+    pure function padded(t: float) -> string {
+        // 00:00, and 1:00:00 from an hour up
+        return (t < 600 ? "0" : "") + State.clock(t);
+    }
+    x: clamp(root.bar-width * root.at - self.width / 2, 0px, max(0px, root.bar-width - self.width));
+    width: tip.preferred-width + 16px;
+    height: 24px;
+    border-radius: 4px;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.hairline;
+    tip := Text {
+        text: root.padded(root.total * root.at) + "/" + root.padded(root.total);
+        font-size: 12px;
+        color: Theme.ink;
+    }
+}
+
 component Controls {
     in property <bool> big;
     HorizontalLayout {
@@ -45,12 +68,13 @@ export component PlayerBar {
             background: Theme.brand;
         }
     }
-    TouchArea {
+    strip := TouchArea {
         y: 0;
         height: 10px;
         mouse-cursor: pointer;
         clicked => { State.seek(State.seek-min + self.mouse-x / self.width * (State.seek-max - State.seek-min)); }
     }
+    if strip.has-hover: SeekTip { y: -28px; bar-width: root.width; at: clamp(strip.mouse-x / strip.width, 0, 1); }
     HorizontalLayout {
         padding-left: 32px;
         padding-right: 32px;
@@ -167,15 +191,21 @@ export component PlayerPage {
             }
             VerticalLayout {
                 spacing: 4px;
-                Slider {
-                    minimum: State.seek-min;
-                    maximum: max(State.seek-max, State.seek-min + 1);
-                    value <=> State.position;
-                    changed => { State.seeking = true; }
-                    released(v) => {
-                        State.seeking = false;
-                        State.seek(v);
+                bar := TouchArea {
+                    height: 20px;
+                    Slider {
+                        width: 100%;
+                        height: 100%;
+                        minimum: State.seek-min;
+                        maximum: max(State.seek-max, State.seek-min + 1);
+                        value <=> State.position;
+                        changed => { State.seeking = true; }
+                        released(v) => {
+                            State.seeking = false;
+                            State.seek(v);
+                        }
                     }
+                    if bar.has-hover: SeekTip { y: -28px; bar-width: bar.width; at: clamp(bar.mouse-x / bar.width, 0, 1); }
                 }
                 HorizontalLayout {
                     Muted { text: State.pos-text; font-size: 12px; horizontal-stretch: 1; }
@@ -183,6 +213,25 @@ export component PlayerPage {
                 }
             }
             Controls { big: true; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+                VerticalLayout {
+                    alignment: center;
+                    Icon { d: Icons.volume; color: Theme.muted; }
+                }
+                Slider {
+                    width: 180px;
+                    minimum: 0;
+                    maximum: 1;
+                    step: 0.05;
+                    accessible-label: "Volume";
+                    value <=> State.volume;
+                    changed(v) => { State.set-volume(v); }
+                    released => { State.save-volume(); }
+                }
+                Muted { width: 40px; text: round(State.volume * 100) + "%"; font-size: 12px; vertical-alignment: center; }
+            }
             HorizontalLayout {
                 spacing: 8px;
                 alignment: center;
@@ -218,10 +267,20 @@ export component PlayerPage {
                 H2 { text: "Chapters"; }
                 Card {
                     clip: true;
-                    ListView {
+                    list := ListView {
                         for c[i] in State.chapters: Row {
                             item: c;
                             clicked => { State.pick-chapter(i); }
+                        }
+                    }
+                    // opens with the playing chapter in the middle, once the list has been laid out and knows its height
+                    Timer {
+                        property <bool> done;
+                        interval: 20ms;
+                        running: !self.done;
+                        triggered => {
+                            self.done = true;
+                            list.content-y = -clamp(State.chapter-index * 48px - (list.visible-height - 48px) / 2, 0px, max(0px, State.chapters.length * 48px - list.visible-height));
                         }
                     }
                 }

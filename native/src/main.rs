@@ -14,6 +14,7 @@ mod mini;
 mod player;
 mod stats;
 mod stretch;
+mod taskbar;
 mod updater;
 
 use api::{Book, Client, Details};
@@ -822,11 +823,20 @@ fn toggle() {
 
 /// Up and Down: volume in steps of 5%.
 fn volume_step(d: f32) {
-    with_app(|a| {
-        a.prefs.volume = (a.prefs.volume + d).clamp(0.0, 1.0);
-        a.out.set_volume(a.prefs.volume);
-    });
+    set_volume(with_app(|a| a.prefs.volume) + d);
     save_prefs();
+}
+
+/// Heard at once. The slider saves it when it is let go, not at every step of a drag.
+fn set_volume(v: f32) {
+    let v = v.clamp(0.0, 1.0);
+    with_app(|a| {
+        a.prefs.volume = v;
+        a.out.set_volume(v);
+    });
+    if let Some(ui) = window() {
+        ui.global::<State>().set_volume(v);
+    }
 }
 
 fn set_paused(paused: bool) {
@@ -1115,6 +1125,7 @@ fn tick(st: &State, tray: &Tray) {
                 .map(|(i, c)| ListRow { title: c.title.clone().into(), sub: clock(c.start).into(), current: Some(i) == ch })
                 .collect();
             st.set_chapters(ModelRc::new(VecModel::from(rows)));
+            st.set_chapter_index(ch.map_or(-1, |i| i as i32));
         }
         if !st.get_seeking() {
             st.set_position(pos as f32);
@@ -1470,7 +1481,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.set_tray(prefs.tray);
     st.set_sync(prefs.sync);
     st.set_metered(prefs.metered);
-    with_app(|a| a.out.set_volume(prefs.volume));
+    set_volume(prefs.volume);
     st.on_toggle_library(|id| toggle_library(id.to_string()));
     st.on_set_default_speed(|s| set_default_speed(s as f64));
     st.on_set_sleep_default(|i| {
@@ -1502,6 +1513,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         refresh_downloads();
     });
     st.on_volume_step(|d| volume_step(d));
+    st.on_set_volume(set_volume);
+    st.on_save_volume(save_prefs);
+    st.on_clock(|t| clock(t as f64).into());
 
     st.on_toggle(toggle);
     st.on_skip(|d| skip(d as f64));
@@ -1600,7 +1614,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (w, t, m, ms) = (ui.as_weak(), tray.as_weak(), mini.as_weak(), mini_state.clone());
     timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
         if let (Some(ui), Some(tray)) = (w.upgrade(), t.upgrade()) {
-            tick(&ui.global::<State>(), &tray);
+            let st = ui.global::<State>();
+            tick(&st, &tray);
+            taskbar::update(taskbar::Shown { has_book: st.get_has_book(), playing: st.get_playing(), back: st.get_back_secs(), fwd: st.get_fwd_secs() });
         }
         if let Some(mini) = m.upgrade().filter(|m| m.window().is_visible()) {
             fill_mini(&mini);
@@ -1619,20 +1635,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         slint::CloseRequestResponse::HideWindow
     });
-    covers::set_scale(ui.window().scale_factor()); // known once the window is on a screen, and needed before the first cover
-    match load_session() {
-        Some((c, user)) => {
-            ui.set_server(c.base.clone().into());
-            load_library(c, user);
+    // the window itself only exists once the event loop runs; the display scale and the window's handle (media keys, taskbar) come with it
+    let ready = Rc::new(Timer::default());
+    let (r, w) = (Rc::downgrade(&ready), ui.as_weak());
+    ready.start(TimerMode::Repeated, Duration::from_millis(5), move || {
+        use raw_window_handle::HasWindowHandle;
+        let (Some(ui), Some(r)) = (w.upgrade(), r.upgrade()) else { return };
+        if ui.window().window_handle().window_handle().is_err() {
+            return;
         }
-        None => st.set_route("settings".into()),
-    }
-    check_updates(true);
-    // media keys need the window's handle, which exists once it is shown
-    let controls = media::register(ui.window(), |e| {
-        let _ = slint::invoke_from_event_loop(move || media_event(e));
+        r.stop();
+        let st = ui.global::<State>();
+        covers::set_scale(ui.window().scale_factor()); // needed before the first cover
+        match load_session() {
+            Some((c, user)) => {
+                ui.set_server(c.base.clone().into());
+                load_library(c, user);
+            }
+            None => st.set_route("settings".into()),
+        }
+        check_updates(true);
+        let controls = media::register(ui.window(), |e| {
+            let _ = slint::invoke_from_event_loop(move || media_event(e));
+        });
+        with_app(|a| a.media = controls);
+        taskbar::register(ui.window(), |b| match b {
+            taskbar::Button::Back => skip(-with_app(|a| a.prefs.back as f64)),
+            taskbar::Button::Toggle => toggle(),
+            taskbar::Button::Forward => skip(with_app(|a| a.prefs.fwd as f64)),
+        });
     });
-    with_app(|a| a.media = controls);
     slint::run_event_loop_until_quit()?;
     if let Some(t) = stop_book() {
         let _ = t.join(); // the closing progress report
