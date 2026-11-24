@@ -15,6 +15,7 @@ export component MiniPlayer inherits Window {
     in property <image> app-icon;
     icon: root.app-icon;
 
+    in property <length> corner; // rounded on a Mac
     in property <bool> has-book;
     in property <string> book-title;
     in property <string> chapter;
@@ -36,7 +37,7 @@ export component MiniPlayer inherits Window {
 
     ThemeSync {}
     // a hairline frame, since the window has no border of its own
-    Rectangle { border-width: 1px; border-color: Theme.hairline; }
+    Rectangle { border-width: 1px; border-color: Theme.hairline; border-radius: root.corner; }
     FocusScope {
         key-pressed(e) => {
             if e.text == Key.Escape {

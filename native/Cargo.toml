@@ -60,5 +60,11 @@ slint-build = "1.19"
 windows = { version = "0.62", features = ["Networking_Connectivity", "Foundation", "Win32_Foundation", "Win32_System_Com", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSColor", "NSEvent", "NSResponder", "NSScreen", "NSView", "NSWindow", "objc2-quartz-core"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-foundation"] }
+tray-icon = { version = "0.25", default-features = false }
+
 [target."cfg(windows)".build-dependencies]
 winresource = "0.1"

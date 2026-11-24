@@ -48,7 +48,7 @@ Lamplit is not affiliated with the Audiobookshelf project. It is an independent 
 
 **Desktop**
 - Media keys and the system's now playing controls (the Windows media flyout and macOS Now Playing)
-- System tray icon with a mini player; closing the window keeps Lamplit playing in the tray
+- Tray icon (menu bar on a Mac) with a mini player; closing the window keeps Lamplit playing in the tray
 - Keyboard shortcuts: Space to play or pause, Left and Right to skip, Up and Down for volume
 - Light and dark themes
 - Updates itself: checks at launch and installs with one click
