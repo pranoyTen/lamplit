@@ -32,6 +32,26 @@ component SeekTip inherits Rectangle {
     }
 }
 
+component VolumeRow inherits HorizontalLayout {
+    spacing: 8px;
+    alignment: center;
+    VerticalLayout {
+        alignment: center;
+        Icon { d: Icons.volume; color: Theme.muted; }
+    }
+    Slider {
+        width: 180px;
+        minimum: 0;
+        maximum: 1;
+        step: 0.05;
+        accessible-label: "Volume";
+        value <=> State.volume;
+        changed(v) => { State.set-volume(v); }
+        released => { State.save-volume(); }
+    }
+    Muted { width: 40px; text: round(State.volume * 100) + "%"; font-size: 12px; vertical-alignment: center; }
+}
+
 component Controls {
     in property <bool> big;
     HorizontalLayout {
@@ -104,7 +124,18 @@ export component PlayerBar {
             y: (parent.height - self.height) / 2;
             clicked => { menu.show(); }
         }
+        IconBtn { icon: Icons.volume; label: "Volume"; clicked => { volume.show(); } }
         IconBtn { icon: Icons.up; label: "Open player"; clicked => { root.open-player(); } }
+    }
+    volume := PopupWindow {
+        close-policy: close-on-click-outside; // a click in it is on the slider
+        width: 284px;
+        height: 52px;
+        x: root.width - self.width - 32px;
+        y: -self.height - 8px;
+        Card {
+            VolumeRow { padding: 12px; }
+        }
     }
     menu := PopupWindow {
         x: speed.x;
@@ -213,25 +244,7 @@ export component PlayerPage {
                 }
             }
             Controls { big: true; }
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: center;
-                VerticalLayout {
-                    alignment: center;
-                    Icon { d: Icons.volume; color: Theme.muted; }
-                }
-                Slider {
-                    width: 180px;
-                    minimum: 0;
-                    maximum: 1;
-                    step: 0.05;
-                    accessible-label: "Volume";
-                    value <=> State.volume;
-                    changed(v) => { State.set-volume(v); }
-                    released => { State.save-volume(); }
-                }
-                Muted { width: 40px; text: round(State.volume * 100) + "%"; font-size: 12px; vertical-alignment: center; }
-            }
+            VolumeRow { }
             HorizontalLayout {
                 spacing: 8px;
                 alignment: center;
