@@ -1,5 +1,10 @@
 // The Mac menu bar icon. Slint's own tray opens its menu on any click there and can't make a template icon, so on a Mac this replaces it:
 // a left-click opens the mini player, a right-click the menu.
+use objc2::MainThreadMarker;
+use objc2::runtime::{AnyObject, Bool, Imp, Sel};
+use objc2::sel;
+use objc2_app_kit::NSApplication;
+use std::sync::OnceLock;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
@@ -38,4 +43,30 @@ pub fn show((rgba, width, height): (Vec<u8>, u32, u32), on: fn(Event)) -> Result
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
         .build()?)
+}
+
+static REOPEN: OnceLock<fn()> = OnceLock::new();
+
+/// Runs `f` when Lamplit is opened again while it runs (from the Dock, Finder or Spotlight). macOS starts no second copy then, it asks
+/// the app delegate, and winit's has no answer, so a closed window would stay closed.
+pub fn on_reopen(f: fn()) {
+    extern "C-unwind" fn reopen(_: &AnyObject, _: Sel, _: *mut AnyObject, _: Bool) -> Bool {
+        if let Some(f) = REOPEN.get() {
+            let _ = slint::invoke_from_event_loop(*f);
+        }
+        Bool::NO // handled
+    }
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let app = NSApplication::sharedApplication(mtm);
+    let Some(delegate) = app.delegate() else { return };
+    if REOPEN.set(f).is_err() {
+        return;
+    }
+    let class: *const _ = AsRef::<AnyObject>::as_ref(&*delegate).class();
+    // SAFETY: the function has the selector's signature, and the class doesn't implement it yet (if it did, adding would do nothing)
+    unsafe {
+        let imp = std::mem::transmute::<extern "C-unwind" fn(&AnyObject, Sel, *mut AnyObject, Bool) -> Bool, Imp>(reopen);
+        objc2::ffi::class_addMethod(class.cast_mut(), sel!(applicationShouldHandleReopen:hasVisibleWindows:), imp, c"B@:@B".as_ptr());
+    }
+    app.setDelegate(Some(&delegate)); // AppKit looks up what the delegate can do when it is set
 }

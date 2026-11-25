@@ -7,6 +7,7 @@ mod covers;
 mod downloads;
 mod eq;
 mod http_source;
+mod instance;
 mod library;
 mod media;
 mod metered;
@@ -1263,6 +1264,7 @@ fn install_update() {
     background(move || updater::install(&u).map(|_| u), |r| match r {
         Ok(_) => {
             if cfg!(target_os = "macos") {
+                instance::release(); // or the new copy would quit again
                 // …/Lamplit.app/Contents/MacOS/lamplit → …/Lamplit.app
                 if let Some(app) = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(3).map(|a| a.to_path_buf())) {
                     let _ = std::process::Command::new("open").arg("-n").arg(app).spawn();
@@ -1322,6 +1324,7 @@ fn show_mini() {
 fn show_main() {
     if let Some(ui) = window() {
         let _ = ui.show();
+        ui.window().set_minimized(false);
         mini::bring_to_front(ui.window());
     }
 }
@@ -1365,6 +1368,9 @@ fn make_tray() -> Result<Tray, slint::PlatformError> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if !instance::claim() {
+        return Ok(()); // the copy already running shows its window
+    }
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()?;
     sink.log_on_drop(false);
     let out = rodio::Player::connect_new(sink.mixer());
@@ -1637,6 +1643,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let timer = Timer::default();
     let (w, m) = (ui.as_weak(), mini.as_weak());
     timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
+        if instance::asked() {
+            show_main();
+        }
         if let Some(ui) = w.upgrade() {
             let st = ui.global::<State>();
             tick(&st, tray.as_ref());
@@ -1669,6 +1678,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return;
         }
         r.stop();
+        #[cfg(target_os = "macos")]
+        menubar::on_reopen(show_main);
         #[cfg(target_os = "macos")]
         if let Some(icon) = png_rgba(include_bytes!("../ui/icons/menubar.png")) {
             match menubar::show(icon, |e| match e {
@@ -1704,6 +1715,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     });
     slint::run_event_loop_until_quit()?;
+    instance::release(); // the rest can take a moment, and opening Lamplit again meanwhile should work
     #[cfg(target_os = "macos")]
     drop(MENU_BAR.take()); // not while the thread is being torn down
     if let Some(t) = stop_book() {
