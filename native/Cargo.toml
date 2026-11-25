@@ -62,9 +62,13 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_Wind
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSColor", "NSEvent", "NSResponder", "NSScreen", "NSView", "NSWindow", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAppearance", "NSApplication", "NSColor", "NSEvent", "NSGraphics", "NSResponder", "NSScreen", "NSView", "NSVisualEffectView", "NSWindow", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-foundation"] }
 tray-icon = { version = "0.25", default-features = false }
 
 [target."cfg(windows)".build-dependencies]
 winresource = "0.1"
+
+# softbuffer 0.4.8 with one line changed (src/backends/cg.rs), so a window can be see-through on a Mac. Drop it once upstream can do that.
+[patch.crates-io]
+softbuffer = { path = "vendor/softbuffer" }

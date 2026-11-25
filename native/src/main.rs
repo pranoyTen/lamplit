@@ -1330,6 +1330,8 @@ fn show_main() {
 fn fill_mini(mini: &MiniPlayer) {
     let Some(ui) = window() else { return };
     let st = ui.global::<State>();
+    #[cfg(target_os = "macos")]
+    mini.global::<Theme>().set_dark(mini::system_dark());
     mini.set_has_book(st.get_has_book());
     mini.set_book_title(st.get_now_title());
     mini.set_chapter(st.get_chapter_text());
@@ -1609,7 +1611,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         mini.set_app_icon(i);
     }
     if cfg!(target_os = "macos") {
-        mini.set_corner(12.0);
+        mini.global::<Theme>().set_mac(true);
     }
     if !cfg!(windows) {
         mini.global::<Theme>().set_sans("".into());
@@ -1702,6 +1704,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     });
     slint::run_event_loop_until_quit()?;
+    #[cfg(target_os = "macos")]
+    drop(MENU_BAR.take()); // not while the thread is being torn down
     if let Some(t) = stop_book() {
         let _ = t.join(); // the closing progress report
     }

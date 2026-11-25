@@ -145,17 +145,17 @@ export component IconBtn inherits Clickable {
     in property <string> caption; // a small number drawn inside, for the skip buttons
     width: main ? 52px : 44px;
     height: self.width;
-    radius: main ? self.width / 2 : 8px;
+    radius: main || Theme.mac ? self.width / 2 : 8px;
     opacity: self.enabled ? 1 : 0.45;
     Rectangle {
         border-radius: root.radius;
-        background: root.main ? Theme.brand : (root.hover && root.enabled ? Theme.hover : transparent);
+        background: root.main ? Theme.main : (root.hover && root.enabled ? Theme.hover : transparent);
     }
     Icon {
         d: root.icon;
         size: root.icon-size;
-        color: root.main ? Theme.on-brand : Theme.ink;
-        fill: root.filled ? (root.main ? Theme.on-brand : Theme.ink) : transparent;
+        color: root.main ? Theme.on-main : Theme.ink;
+        fill: root.filled ? (root.main ? Theme.on-main : Theme.ink) : transparent;
         stroke: root.main && root.icon == Icons.pause ? 2.5px : 1.5px;
     }
     if root.caption != "": Text {

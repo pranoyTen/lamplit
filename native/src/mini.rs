@@ -1,6 +1,6 @@
 // The tray mini player's window chores on Windows: open it beside the tray icon (bottom right, or wherever the taskbar is), keep it
 // out of the taskbar, bring it to the front, and tell whether it still has the focus so a click elsewhere can close it.
-// On a Mac: under the menu bar icon, with rounded corners. Elsewhere these do nothing and the window opens where the system puts it.
+// On a Mac: under the menu bar icon, as a blurred popover in the Mac's light or dark. Elsewhere these do nothing and the window opens where the system puts it.
 
 #[cfg(windows)]
 mod imp {
@@ -62,7 +62,10 @@ mod imp {
 mod imp {
     use objc2::MainThreadMarker;
     use objc2::rc::Retained;
-    use objc2_app_kit::{NSApplication, NSColor, NSEvent, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior};
+    use objc2_app_kit::{
+        NSApplication, NSAutoresizingMaskOptions, NSColor, NSEvent, NSScreen, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+        NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior, NSWindowOrderingMode,
+    };
 
     fn ns_window(w: &slint::Window) -> Option<Retained<NSWindow>> {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -93,16 +96,31 @@ mod imp {
 
     /// There is no taskbar to hide from; this is where the window gets its popover look.
     pub fn hide_from_taskbar(w: &slint::Window) {
-        let Some(win) = ns_window(w) else { return };
+        let (Some(win), Some(mtm)) = (ns_window(w), MainThreadMarker::new()) else { return };
         // opens on the Space in use, also over a full-screen app
         win.setCollectionBehavior(NSWindowCollectionBehavior::MoveToActiveSpace | NSWindowCollectionBehavior::FullScreenAuxiliary);
         win.setOpaque(false);
         win.setBackgroundColor(Some(&NSColor::clearColor()));
-        if let Some(view) = win.contentView() {
-            view.setWantsLayer(true);
-            if let Some(layer) = view.layer() {
+        let round = |v: &NSView| {
+            v.setWantsLayer(true);
+            if let Some(layer) = v.layer() {
                 layer.setCornerRadius(12.0);
                 layer.setMasksToBounds(true);
+            }
+        };
+        if let Some(view) = win.contentView() {
+            round(&view);
+            // the blur goes behind the content view, not in it: there it could cover what Slint draws and take its clicks
+            // SAFETY: the superview belongs to the live window
+            if let Some(frame) = unsafe { view.superview() } {
+                let blur = NSVisualEffectView::new(mtm);
+                blur.setFrame(view.frame());
+                blur.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
+                blur.setMaterial(NSVisualEffectMaterial::Popover);
+                blur.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+                blur.setState(NSVisualEffectState::Active);
+                round(&blur);
+                frame.addSubview_positioned_relativeTo(&blur, NSWindowOrderingMode::Below, Some(&view));
             }
         }
         win.invalidateShadow();
@@ -117,6 +135,11 @@ mod imp {
 
     pub fn has_focus(w: &slint::Window) -> bool {
         ns_window(w).is_some_and(|win| win.isKeyWindow())
+    }
+
+    /// Whether the Mac is in dark mode.
+    pub fn system_dark() -> bool {
+        MainThreadMarker::new().is_some_and(|mtm| NSApplication::sharedApplication(mtm).effectiveAppearance().name().to_string().contains("Dark"))
     }
 }
 
