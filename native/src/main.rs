@@ -7,9 +7,12 @@ mod covers;
 mod downloads;
 mod eq;
 mod http_source;
+mod instance;
 mod library;
 mod media;
 mod metered;
+#[cfg(target_os = "macos")]
+mod menubar;
 mod mini;
 mod player;
 mod stats;
@@ -255,6 +258,11 @@ fn app_icon() -> Option<Image> {
 
 /// A PNG built into the exe as RGBA pixels: images embedded for the software renderer can't become window or tray icons.
 fn png_image(bytes: &[u8]) -> Option<Image> {
+    let (px, w, h) = png_rgba(bytes)?;
+    Some(Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&px, w, h)))
+}
+
+fn png_rgba(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let mut d = png::Decoder::new(std::io::Cursor::new(bytes));
     d.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
     let mut r = d.read_info().ok()?;
@@ -263,8 +271,8 @@ fn png_image(bytes: &[u8]) -> Option<Image> {
     if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
         return None;
     }
-    let px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&buf[..info.buffer_size()], info.width, info.height);
-    Some(Image::from_rgba8(px))
+    buf.truncate(info.buffer_size());
+    Some((buf, info.width, info.height))
 }
 
 // ---- books and covers ----
@@ -1062,7 +1070,7 @@ fn play_book(id: String) {
 
 // four times a second: move the position bar, show errors and the end of the book, keep the OS overlay and the tray in step,
 // and report progress every 15 seconds heard
-fn tick(st: &State, tray: &Tray) {
+fn tick(st: &State, tray: Option<&Tray>) {
     let due = with_app(|a| {
         let paused = a.out.is_paused();
         let Some(p) = a.playing.as_mut() else { return false };
@@ -1073,8 +1081,10 @@ fn tick(st: &State, tray: &Tray) {
             if let Some(m) = a.media.as_mut() {
                 media::show_state(m, Some(playing), p.engine.status.pos());
             }
-            tray.set_playing(playing);
-            tray.set_has_book(true);
+            if let Some(tray) = tray {
+                tray.set_playing(playing);
+                tray.set_has_book(true);
+            }
             a.shown = (Some(playing), Instant::now());
         }
         let now = Instant::now();
@@ -1254,6 +1264,7 @@ fn install_update() {
     background(move || updater::install(&u).map(|_| u), |r| match r {
         Ok(_) => {
             if cfg!(target_os = "macos") {
+                instance::release(); // or the new copy would quit again
                 // …/Lamplit.app/Contents/MacOS/lamplit → …/Lamplit.app
                 if let Some(app) = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(3).map(|a| a.to_path_buf())) {
                     let _ = std::process::Command::new("open").arg("-n").arg(app).spawn();
@@ -1275,17 +1286,55 @@ struct MiniState {
 
 thread_local! {
     static MINI: RefCell<Option<slint::Weak<MiniPlayer>>> = const { RefCell::new(None) };
+    static MINI_STATE: RefCell<MiniState> = RefCell::default();
+    #[cfg(target_os = "macos")]
+    static MENU_BAR: RefCell<Option<tray_icon::TrayIcon>> = const { RefCell::new(None) };
 }
 
-fn hide_mini(mini: &MiniPlayer, ms: &RefCell<MiniState>) {
+fn hide_mini(mini: &MiniPlayer) {
     let _ = mini.hide();
-    ms.borrow_mut().hidden_at = Some(Instant::now());
+    MINI_STATE.with_borrow_mut(|s| s.hidden_at = Some(Instant::now()));
+}
+
+/// A click on the tray icon: opens the mini player beside it, or closes it.
+fn show_mini() {
+    let Some(mini) = MINI.with_borrow(|m| m.as_ref().and_then(|w| w.upgrade())) else { return };
+    if mini.window().is_visible() {
+        return hide_mini(&mini);
+    }
+    // the click on the icon is what took the focus away and closed it: don't reopen straight away
+    if MINI_STATE.with_borrow(|s| s.hidden_at.is_some_and(|t| t.elapsed() < Duration::from_millis(400))) {
+        return;
+    }
+    fill_mini(&mini);
+    mini::place(mini.window(), 340.0, 268.0);
+    let _ = mini.show();
+    let first = !MINI_STATE.with_borrow_mut(|s| std::mem::replace(&mut s.styled, true));
+    if first {
+        // the taskbar button only goes once the window is shown again with the new style
+        mini::hide_from_taskbar(mini.window());
+        let _ = mini.hide();
+        let _ = mini.show();
+        mini::place(mini.window(), 340.0, 268.0);
+    }
+    mini::bring_to_front(mini.window());
+    MINI_STATE.with_borrow_mut(|s| s.shown_at = Some(Instant::now()));
+}
+
+fn show_main() {
+    if let Some(ui) = window() {
+        let _ = ui.show();
+        ui.window().set_minimized(false);
+        mini::bring_to_front(ui.window());
+    }
 }
 
 /// Copies what the main window shows about the playing book into the mini player.
 fn fill_mini(mini: &MiniPlayer) {
     let Some(ui) = window() else { return };
     let st = ui.global::<State>();
+    #[cfg(target_os = "macos")]
+    mini.global::<Theme>().set_dark(mini::system_dark());
     mini.set_has_book(st.get_has_book());
     mini.set_book_title(st.get_now_title());
     mini.set_chapter(st.get_chapter_text());
@@ -1302,7 +1351,26 @@ fn fill_mini(mini: &MiniPlayer) {
     mini.set_t1(st.get_left_text());
 }
 
+fn make_tray() -> Result<Tray, slint::PlatformError> {
+    let tray = Tray::new()?;
+    match tray_icon() {
+        Some(i) => tray.set_image(i),
+        None => eprintln!("the tray icon could not be decoded"),
+    }
+    tray.on_show_window(show_main);
+    tray.on_show_mini(show_mini);
+    tray.on_toggle(toggle);
+    tray.on_quit(|| {
+        let _ = slint::quit_event_loop();
+    });
+    tray.show()?;
+    Ok(tray)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if !instance::claim() {
+        return Ok(()); // the copy already running shows its window
+    }
     let mut sink = rodio::DeviceSinkBuilder::open_default_sink()?;
     sink.log_on_drop(false);
     let out = rodio::Player::connect_new(sink.mixer());
@@ -1539,22 +1607,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     st.on_extend_sleep(extend_sleep);
 
     // closing the window only hides it (Slint's default) and playback goes on; the tray brings it back or quits
-    let tray = Tray::new()?;
-    match tray_icon() {
-        Some(i) => tray.set_image(i),
-        None => eprintln!("the tray icon could not be decoded"),
-    }
-    let w = ui.as_weak();
-    tray.on_show_window(move || {
-        if let Some(ui) = w.upgrade() {
-            let _ = ui.show();
-        }
-    });
-    tray.on_toggle(toggle);
-    tray.on_quit(|| {
-        let _ = slint::quit_event_loop();
-    });
-    tray.show()?;
+    // (on a Mac the menu bar icon is menubar.rs)
+    let tray = if cfg!(target_os = "macos") { None } else { Some(make_tray()?) };
 
     // the mini player: left-click on the tray icon opens it beside the icon, a click anywhere else closes it
     let mini = MiniPlayer::new()?;
@@ -1562,68 +1616,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(i) = app_icon() {
         mini.set_app_icon(i);
     }
+    if cfg!(target_os = "macos") {
+        mini.global::<Theme>().set_mac(true);
+    }
     if !cfg!(windows) {
         mini.global::<Theme>().set_sans("".into());
     }
-    let mini_state = Rc::new(RefCell::new(MiniState::default()));
     MINI.with(|m| *m.borrow_mut() = Some(mini.as_weak()));
-    let (m, ms) = (mini.as_weak(), mini_state.clone());
-    tray.on_show_mini(move || {
-        let Some(mini) = m.upgrade() else { return };
-        if mini.window().is_visible() {
-            return hide_mini(&mini, &ms);
-        }
-        // the click on the icon is what took the focus away and closed it: don't reopen straight away
-        if ms.borrow().hidden_at.is_some_and(|t| t.elapsed() < Duration::from_millis(400)) {
-            return;
-        }
-        fill_mini(&mini);
-        mini::place(mini.window(), 340.0, 268.0);
-        let _ = mini.show();
-        let first = !std::mem::replace(&mut ms.borrow_mut().styled, true);
-        if first {
-            // the taskbar button only goes once the window is shown again with the new style
-            mini::hide_from_taskbar(mini.window());
-            let _ = mini.hide();
-            let _ = mini.show();
-            mini::place(mini.window(), 340.0, 268.0);
-        }
-        mini::bring_to_front(mini.window());
-        ms.borrow_mut().shown_at = Some(Instant::now());
-    });
     mini.on_toggle(toggle);
     mini.on_skip(|d| skip(d as f64));
     mini.on_chapter_step(chapter_step);
-    let (m, ms) = (mini.as_weak(), mini_state.clone());
+    let m = mini.as_weak();
     mini.on_dismiss(move || {
         if let Some(mini) = m.upgrade() {
-            hide_mini(&mini, &ms);
+            hide_mini(&mini);
         }
     });
-    let (w, m, ms) = (ui.as_weak(), mini.as_weak(), mini_state.clone());
+    let m = mini.as_weak();
     mini.on_open_main(move || {
         if let Some(mini) = m.upgrade() {
-            hide_mini(&mini, &ms);
+            hide_mini(&mini);
         }
-        if let Some(ui) = w.upgrade() {
-            let _ = ui.show();
-            mini::bring_to_front(ui.window());
-        }
+        show_main();
     });
 
     let timer = Timer::default();
-    let (w, t, m, ms) = (ui.as_weak(), tray.as_weak(), mini.as_weak(), mini_state.clone());
+    let (w, m) = (ui.as_weak(), mini.as_weak());
     timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
-        if let (Some(ui), Some(tray)) = (w.upgrade(), t.upgrade()) {
+        if instance::asked() {
+            show_main();
+        }
+        if let Some(ui) = w.upgrade() {
             let st = ui.global::<State>();
-            tick(&st, &tray);
+            tick(&st, tray.as_ref());
             taskbar::update(taskbar::Shown { has_book: st.get_has_book(), playing: st.get_playing(), back: st.get_back_secs(), fwd: st.get_fwd_secs() });
         }
         if let Some(mini) = m.upgrade().filter(|m| m.window().is_visible()) {
             fill_mini(&mini);
-            let settled = ms.borrow().shown_at.is_some_and(|t| t.elapsed() > Duration::from_millis(400));
+            let settled = MINI_STATE.with_borrow(|s| s.shown_at.is_some_and(|t| t.elapsed() > Duration::from_millis(400)));
             if settled && !mini::has_focus(mini.window()) {
-                hide_mini(&mini, &ms);
+                hide_mini(&mini);
             }
         }
     });
@@ -1646,6 +1678,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return;
         }
         r.stop();
+        #[cfg(target_os = "macos")]
+        menubar::on_reopen(show_main);
+        #[cfg(target_os = "macos")]
+        if let Some(icon) = png_rgba(include_bytes!("../ui/icons/menubar.png")) {
+            match menubar::show(icon, |e| match e {
+                menubar::Event::Mini => show_mini(),
+                menubar::Event::Main => show_main(),
+                menubar::Event::Toggle => toggle(),
+                menubar::Event::Quit => {
+                    let _ = slint::quit_event_loop();
+                }
+            }) {
+                Ok(icon) => MENU_BAR.with_borrow_mut(|m| *m = Some(icon)),
+                Err(e) => eprintln!("no menu bar icon: {e}"),
+            }
+        }
         let st = ui.global::<State>();
         covers::set_scale(ui.window().scale_factor()); // needed before the first cover
         match load_session() {
@@ -1667,6 +1715,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     });
     slint::run_event_loop_until_quit()?;
+    instance::release(); // the rest can take a moment, and opening Lamplit again meanwhile should work
+    #[cfg(target_os = "macos")]
+    drop(MENU_BAR.take()); // not while the thread is being torn down
     if let Some(t) = stop_book() {
         let _ = t.join(); // the closing progress report
     }

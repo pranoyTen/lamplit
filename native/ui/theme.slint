@@ -3,6 +3,8 @@ import { Palette } from "std-widgets.slint";
 
 export global Theme {
     in-out property <bool> dark;
+    // only in the mini player on a Mac: the system's neutral colours, translucent so they sit on the window's blur
+    in-out property <bool> mac;
     // set from Rust per platform: Segoe UI on Windows, the system font elsewhere
     in-out property <string> sans: "Segoe UI";
     out property <string> serif: "Georgia";
@@ -10,17 +12,20 @@ export global Theme {
     out property <color> s100: dark ? #151514 : #f5f4f1;
     out property <color> s200: dark ? #1c1c1a : #ebe9e5;
     out property <color> raised: dark ? #252523 : #fcfbf9;
-    out property <color> ink: dark ? #efede8 : #1f1e1b;
-    out property <color> muted: dark ? #aaa79f : #5b5852;
+    out property <color> ink: mac ? (dark ? #f5f5f7 : #1d1d1f) : (dark ? #efede8 : #1f1e1b);
+    out property <color> muted: mac ? (dark ? #a1a1a6 : #6e6e73) : (dark ? #aaa79f : #5b5852);
     out property <color> hairline: dark ? #34332f : #d9d6d0;
     out property <color> border-strong: #85817a;
     out property <color> brand: dark ? #e0a951 : #8a5a10;
     out property <color> on-brand: dark ? #151514 : #fcfbf9;
+    // the round play button
+    out property <color> main: mac ? ink : brand;
+    out property <color> on-main: mac ? (dark ? #1d1d1f : #ffffff) : on-brand;
     out property <color> accent: dark ? #5fc2bb : #1f6f6b;
-    out property <color> track: dark ? #34332f : #dcd9d3;
+    out property <color> track: mac ? (dark ? #ffffff38 : #00000024) : (dark ? #34332f : #dcd9d3);
     out property <color> danger: dark ? #f08a73 : #a3321f;
     out property <color> focus: dark ? #7db4f0 : #1f5fa8;
-    out property <color> hover: #80808024;
+    out property <color> hover: mac ? (dark ? #ffffff1f : #00000012) : #80808024;
     out property <color> cover-text: #efe6d3;
 }
 

@@ -1,7 +1,17 @@
 // The mini player that opens from the tray icon: what's playing, the controls, and a way back to the full window.
 // It is its own window, so it has its own copy of the shared globals; Rust fills its properties from the same timer as the main window.
 import { Theme, ThemeSync } from "theme.slint";
-import { Icons, IconBtn, Btn, Bar, Cover, Muted } from "widgets.slint";
+import { Icons, IconBtn, Btn, Clickable, Bar, Cover, Muted } from "widgets.slint";
+
+// a full-width borderless button, like the ones in macOS popovers
+component MacBtn inherits Clickable {
+    in property <string> text;
+    label: text;
+    height: 28px;
+    radius: 6px;
+    Rectangle { border-radius: 6px; background: root.hover ? Theme.track : Theme.hover; }
+    Text { text: root.text; font-weight: 500; color: Theme.ink; }
+}
 
 export component MiniPlayer inherits Window {
     title: "Lamplit";
@@ -9,9 +19,9 @@ export component MiniPlayer inherits Window {
     always-on-top: true;
     width: 340px;
     height: 268px;
-    background: Theme.raised;
+    background: Theme.mac ? transparent : Theme.raised; // on a Mac the blur behind the window shows through
     default-font-family: Theme.sans;
-    default-font-size: 14px;
+    default-font-size: Theme.mac ? 13px : 14px;
     in property <image> app-icon;
     icon: root.app-icon;
 
@@ -36,7 +46,7 @@ export component MiniPlayer inherits Window {
 
     ThemeSync {}
     // a hairline frame, since the window has no border of its own
-    Rectangle { border-width: 1px; border-color: Theme.hairline; }
+    if !Theme.mac: Rectangle { border-width: 1px; border-color: Theme.hairline; }
     FocusScope {
         key-pressed(e) => {
             if e.text == Key.Escape {
@@ -51,7 +61,7 @@ export component MiniPlayer inherits Window {
         spacing: 12px;
         HorizontalLayout {
             spacing: 12px;
-            Cover { width: 64px; height: 64px; img: root.cover; title: ""; tint: root.tint; }
+            Cover { width: 64px; height: 64px; radius: Theme.mac ? 6px : 4px; img: root.cover; title: ""; tint: root.tint; }
             VerticalLayout {
                 alignment: center;
                 min-width: 0;
@@ -85,7 +95,8 @@ export component MiniPlayer inherits Window {
             IconBtn { icon: Icons.fwd; label: "Forward " + root.fwd-secs + " seconds"; caption: root.fwd-secs; enabled: root.has-book; clicked => { root.skip(root.fwd-secs); } }
             IconBtn { icon: Icons.next; label: "Next chapter"; enabled: root.has-book && root.has-chapters; clicked => { root.chapter-step(1); } }
         }
-        HorizontalLayout {
+        if Theme.mac: MacBtn { text: "Open Lamplit"; clicked => { root.open-main(); } }
+        if !Theme.mac: HorizontalLayout {
             alignment: center;
             Btn { small: true; text: "Open Lamplit"; clicked => { root.open-main(); } }
         }
