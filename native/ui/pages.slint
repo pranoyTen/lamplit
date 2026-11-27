@@ -1,173 +1,170 @@
 // Series and Stats.
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Icons, Clickable, Link, Bar, Card, Cover, H1, H2, Muted } from "widgets.slint";
+import { Icons, Clickable, Link, Bar, Card, Cover, H1, H2, Muted, Toolbar, ToolTitle, SectionHead } from "widgets.slint";
 import { BookGrid, Pill } from "screens.slint";
 import { State } from "state.slint";
 
 export component SeriesPage {
-    sv := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: sv.visible-width;
-            padding: 32px;
-            spacing: 24px;
-            alignment: start;
-            if State.route == "series": VerticalLayout {
+    VerticalLayout {
+        if State.route == "series": Toolbar { ToolTitle { text: "Series"; } }
+        if State.route == "series-books": Toolbar {
+            Link { text: "All series"; icon: Icons.left; y: (parent.height - self.height) / 2; clicked => { State.route = "series"; } }
+            ToolTitle { text: State.series-title; }
+            Muted { text: State.series-count; font-size: 12px; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        sv := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: sv.visible-width;
+                padding: 24px;
+                padding-bottom: 40px;
                 spacing: 24px;
-                H1 { text: "Series"; }
-                if State.series-list.length == 0: Muted { text: State.series-loading ? "Loading…" : "No series in your libraries"; }
-                BookGrid {
+                alignment: start;
+                if State.route == "series" && State.series-list.length == 0: Muted { text: State.series-loading ? "Loading…" : "No series in your libraries"; }
+                if State.route == "series": BookGrid {
                     books: State.series-list;
                     series: true;
                     view-top: -sv.content-y - self.y;
                     view-height: sv.visible-height;
                     need(a, b) => { State.covers-needed("series", a, b); }
                 }
-            }
-            if State.route == "series-books": VerticalLayout {
-                spacing: 24px;
-                HorizontalLayout {
-                    alignment: start;
-                    Link { text: "All series"; icon: Icons.left; clicked => { State.route = "series"; } }
-                }
-                VerticalLayout {
-                    H1 { text: State.series-title; }
-                    Muted { text: State.series-count; }
-                }
-                BookGrid { books: State.series-books; }
+                if State.route == "series-books": BookGrid { books: State.series-books; }
             }
         }
     }
 }
 
-// a big number with its label, one of the four at the top of Stats
-component TileCard inherits Card {
+// one of the four figures at the top of Stats, inside a shared well
+component Figure {
     in property <string> label;
     in property <string> value;
+    in property <bool> first;
     horizontal-stretch: 1;
+    if !root.first: Rectangle { x: 0; width: 1px; background: Theme.hairline; }
     VerticalLayout {
-        padding: 20px;
+        padding: 24px;
         spacing: 4px;
         Muted { text: root.label; font-size: 12px; }
-        Text { text: root.value; font-family: Theme.serif; font-weight: 600; font-size: 28px; color: Theme.ink; overflow: elide; }
+        Text { text: root.value; font-weight: 700; font-size: 28px; letter-spacing: -0.5px; color: Theme.ink; overflow: elide; }
     }
 }
 
 export component StatsPage {
-    sv := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: sv.visible-width;
-            padding: 32px;
-            spacing: 32px;
-            alignment: start;
+    VerticalLayout {
+        Toolbar {
+            ToolTitle { text: "Stats"; }
+            Muted { text: State.stats-subtitle; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
             HorizontalLayout {
-                spacing: 16px;
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    H1 { text: "Stats"; }
-                    Muted { text: State.stats-subtitle; }
-                }
-                VerticalLayout {
-                    alignment: end;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        for r[i] in ["Week", "Month", "Year"]: Pill {
-                            text: r;
-                            on: State.stats-range == i;
-                            clicked => {
-                                State.stats-range = i;
-                                State.show-stats();
-                            }
+                spacing: 6px;
+                for r[i] in ["Week", "Month", "Year"]: VerticalLayout {
+                    alignment: center;
+                    Pill {
+                        text: r;
+                        on: State.stats-range == i;
+                        clicked => {
+                            State.stats-range = i;
+                            State.show-stats();
                         }
                     }
                 }
             }
-            if State.stats-loading: Muted { text: "Loading…"; }
-            HorizontalLayout {
-                spacing: 16px;
-                for t in State.tiles: TileCard { label: t.label; value: t.value; }
-            }
-            if State.chart.length > 0: Card {
-                VerticalLayout {
-                    padding: 24px;
-                    spacing: 16px;
-                    H2 { text: State.chart-title; }
-                    // the bars, tallest at 196 px; the latest (today, or this month) in the brand colour
-                    HorizontalLayout {
-                        height: 220px;
-                        spacing: State.chart.length <= 12 ? 12px : 4px;
-                        for b in State.chart: VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: end;
-                            spacing: 4px;
-                            if State.chart.length <= 12: Text { text: b.text; font-size: 12px; font-weight: 500; color: Theme.ink; horizontal-alignment: center; }
-                            Rectangle {
-                                height: max(b.value > 0 ? 2px : 0px, 196px * b.value);
-                                border-radius: 2px;
-                                background: b.current ? Theme.brand : Theme.accent;
-                            }
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: State.chart.length <= 12 ? 12px : 4px;
-                        for b in State.chart: Muted { text: b.label; font-size: 12px; horizontal-alignment: center; horizontal-stretch: 1; min-width: 0; }
-                    }
-                }
-            }
-            HorizontalLayout {
-                spacing: 24px;
+        }
+        sv := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: sv.visible-width;
+                padding: 24px;
+                padding-bottom: 40px;
+                spacing: 32px;
                 alignment: start;
-                VerticalLayout {
-                    spacing: 12px;
-                    horizontal-stretch: 1;
-                    min-width: 0;
-                    alignment: start;
-                    VerticalLayout {
-                        H2 { text: "Most listened authors"; }
-                        Muted { text: "All time"; font-size: 12px; }
-                    }
-                    if State.top-authors.length == 0: Muted { text: "Nothing yet"; }
-                    for a in State.top-authors: VerticalLayout {
-                        spacing: 4px;
-                        HorizontalLayout {
-                            Text { text: a.label; font-weight: 500; color: Theme.ink; horizontal-stretch: 1; overflow: elide; }
-                            Muted { text: a.text; }
-                        }
-                        Bar { value: a.value; thick: 6px; }
+                if State.stats-loading: Muted { text: "Loading…"; }
+                Card {
+                    HorizontalLayout {
+                        for t[i] in State.tiles: Figure { label: t.label; value: t.value; first: i == 0; }
                     }
                 }
-                VerticalLayout {
-                    spacing: 12px;
-                    horizontal-stretch: 1;
-                    min-width: 0;
-                    alignment: start;
+                if State.chart.length > 0: Card {
                     VerticalLayout {
-                        H2 { text: "Recently finished"; }
-                        Muted { text: "Latest five"; font-size: 12px; }
-                    }
-                    if State.recent-finished.length == 0: Muted { text: "No finished books yet"; }
-                    for f in State.recent-finished: Clickable {
-                        label: f.title;
-                        height: 48px;
-                        clicked => { State.open-book(f.id); }
+                        padding: 24px;
+                        spacing: 16px;
+                        H2 { text: State.chart-title; }
+                        // the bars, tallest at 196 px: the rest in ink, the latest (today, or this month) in teal
                         HorizontalLayout {
-                            spacing: 12px;
-                            VerticalLayout {
-                                alignment: center;
-                                Cover { width: 40px; height: 40px; img: f.cover; title: ""; tint: f.tint; }
-                            }
-                            VerticalLayout {
-                                alignment: center;
+                            height: 220px;
+                            spacing: State.chart.length <= 12 ? 12px : 4px;
+                            for b in State.chart: VerticalLayout {
                                 horizontal-stretch: 1;
-                                min-width: 0;
-                                Text { text: f.title; font-weight: 500; color: Theme.ink; overflow: elide; }
-                                Muted { text: f.author; font-size: 12px; }
+                                alignment: end;
+                                spacing: 4px;
+                                if State.chart.length <= 12: Text { text: b.text; font-size: 12px; font-weight: b.current ? 600 : 400; color: b.current ? Theme.ink : Theme.muted; horizontal-alignment: center; }
+                                Rectangle {
+                                    height: max(b.value > 0 ? 2px : 0px, 196px * b.value);
+                                    border-top-left-radius: 3px;
+                                    border-top-right-radius: 3px;
+                                    background: b.current ? Theme.accent : Theme.ink-2;
+                                }
                             }
-                            Muted { text: f.when; font-size: 12px; vertical-alignment: center; }
+                        }
+                        Rectangle { height: 1px; background: Theme.ink; }
+                        HorizontalLayout {
+                            spacing: State.chart.length <= 12 ? 12px : 4px;
+                            for b in State.chart: Muted { text: b.label; font-size: 12px; horizontal-alignment: center; horizontal-stretch: 1; min-width: 0; }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 48px;
+                    VerticalLayout {
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+                        min-width: 0;
+                        alignment: start;
+                        SectionHead { text: "Most listened authors"; note: "All time"; }
+                        if State.top-authors.length == 0: Muted { text: "Nothing yet"; }
+                        for a[i] in State.top-authors: VerticalLayout {
+                            padding-top: 8px;
+                            spacing: 6px;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                Muted { text: i + 1; width: 16px; }
+                                Text { text: a.label; font-weight: 600; color: Theme.ink; horizontal-stretch: 1; overflow: elide; }
+                                Muted { text: a.text; }
+                            }
+                            Bar { value: a.value; thick: 4px; fill: i == 0 ? Theme.ink : Theme.ink-2; }
+                            Rectangle { height: 1px; background: Theme.hairline; }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 0;
+                        horizontal-stretch: 1;
+                        min-width: 0;
+                        alignment: start;
+                        SectionHead { text: "Recently finished"; note: "Latest five"; }
+                        if State.recent-finished.length == 0: Muted { text: "No finished books yet"; }
+                        for f in State.recent-finished: VerticalLayout {
+                            Clickable {
+                                label: f.title;
+                                height: 60px;
+                                clicked => { State.open-book(f.id); }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Cover { width: 40px; height: 40px; img: f.cover; title: ""; tint: f.tint; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        min-width: 0;
+                                        Text { text: f.title; font-weight: 600; color: Theme.ink; overflow: elide; }
+                                        Muted { text: f.author; font-size: 12px; }
+                                    }
+                                    Muted { text: f.when; font-size: 12px; vertical-alignment: center; }
+                                }
+                            }
+                            Rectangle { height: 1px; background: Theme.hairline; }
                         }
                     }
                 }

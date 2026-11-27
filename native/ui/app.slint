@@ -1,4 +1,4 @@
-// The main window: the sidebar, the current screen, and the player bar along the bottom.
+// The main window: the sidebar, the current screen under its toolbar, and the player bar along the bottom.
 import { Theme, ThemeSync } from "theme.slint";
 import { Icons, Icon, Clickable, Btn, Muted } from "widgets.slint";
 import { State, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, LibRow } from "state.slint";
@@ -10,30 +10,33 @@ import { MiniPlayer } from "mini.slint";
 
 export { State, Theme, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, MiniPlayer, LibRow }
 
+// one destination in the sidebar: its icon, and its name unless the sidebar is collapsed
 component NavItem inherits Clickable {
     in property <string> text;
     in property <string> icon;
     in property <bool> current;
+    in property <bool> compact;
     label: text;
     height: 36px;
     accessible-item-selected: current;
-    Rectangle { border-radius: 8px; background: root.hover && !root.current ? Theme.hover : transparent; }
+    Rectangle {
+        border-radius: 8px;
+        background: root.current || root.hover ? Theme.s300 : transparent;
+        Rectangle { x: 0; width: 2px; background: root.current ? Theme.ink : transparent; }
+    }
     HorizontalLayout {
-        padding-left: 8px;
+        padding-left: root.compact ? 0 : 12px;
         spacing: 12px;
+        alignment: root.compact ? center : start;
         VerticalLayout {
             alignment: center;
-            Rectangle { width: 2px; height: 16px; border-radius: 1px; background: root.current ? Theme.brand : transparent; }
+            Icon { d: root.icon; size: 18px; color: root.current ? Theme.ink : Theme.muted; }
         }
-        VerticalLayout {
-            alignment: center;
-            Icon { d: root.icon; color: root.current ? Theme.brand : Theme.muted; }
-        }
-        Text {
+        if !root.compact: Text {
             text: root.text;
             vertical-alignment: center;
-            color: root.current ? Theme.ink : Theme.muted;
-            font-weight: root.current ? 500 : 400;
+            color: root.current ? Theme.ink : Theme.ink-2;
+            font-weight: root.current ? 600 : 400;
         }
     }
 }
@@ -50,12 +53,19 @@ export component AppWindow inherits Window {
     in-out property <string> server; // the sign-in form's address, filled from the last sign-in
     in property <image> app-icon; // set from Rust as plain pixels, like the tray icon
     icon: root.app-icon;
+    // the sidebar shows only icons once collapsed with its button
+    in-out property <bool> collapsed;
+    property <bool> compact: root.collapsed;
 
     ThemeSync {}
     // keyboard shortcuts (Settings > Keyboard shortcuts); a focused text field gets its keys first, so typing never pauses
     forward-focus: keys;
     keys := FocusScope {
     key-pressed(e) => {
+        if e.text == Key.LeftArrow && e.modifiers.alt && (State.route == "book" || State.route == "player") {
+            State.route = State.back-route;
+            return accept;
+        }
         if e.text == " " && State.has-book {
             State.toggle();
             return accept;
@@ -78,65 +88,68 @@ export component AppWindow inherits Window {
         }
         reject
     }
+    VerticalLayout {
     HorizontalLayout {
+        vertical-stretch: 1;
         Rectangle {
-            width: 240px;
+            width: root.compact ? 60px : 220px;
             background: Theme.s200;
             Rectangle { x: parent.width - 1px; width: 1px; background: Theme.hairline; }
             VerticalLayout {
-                padding-top: 24px;
-                padding-bottom: 24px;
-                padding-left: 16px;
-                padding-right: 16px;
-                spacing: 24px;
+                padding: 12px;
+                padding-left: 8px;
+                padding-right: 9px;
+                spacing: 2px;
                 HorizontalLayout {
-                    padding-left: 8px;
-                    Text { text: "Lamplit"; font-family: Theme.serif; font-weight: 600; font-size: 22px; color: Theme.ink; }
+                    alignment: root.compact ? center : start;
+                    padding-bottom: 8px;
+                    Clickable {
+                        label: root.collapsed ? "Expand the sidebar" : "Collapse the sidebar";
+                        width: 36px;
+                        height: 36px;
+                        clicked => { root.collapsed = !root.collapsed; }
+                        Rectangle { border-radius: 8px; background: parent.hover ? Theme.s300 : transparent; }
+                        Icon { d: Icons.sidebar; size: 18px; color: Theme.muted; }
+                    }
                 }
-                VerticalLayout {
-                    spacing: 4px;
-                    NavItem { text: "Home"; icon: Icons.home; current: State.route == "home"; enabled: State.signed-in; clicked => { State.route = "home"; } }
-                    NavItem { text: "Library"; icon: Icons.library; current: State.route == "library"; enabled: State.signed-in; clicked => { State.route = "library"; } }
-                    NavItem {
-                        text: "Series";
-                        icon: Icons.series;
-                        current: State.route == "series" || State.route == "series-books";
-                        enabled: State.signed-in;
-                        clicked => {
-                            State.route = "series";
-                            State.show-series();
-                        }
+                NavItem { text: "Home"; icon: Icons.home; compact: root.compact; current: State.route == "home"; enabled: State.signed-in; clicked => { State.route = "home"; } }
+                NavItem { text: "Library"; icon: Icons.library; compact: root.compact; current: State.route == "library"; enabled: State.signed-in; clicked => { State.route = "library"; } }
+                NavItem {
+                    text: "Series";
+                    icon: Icons.series;
+                    compact: root.compact;
+                    current: State.route == "series" || State.route == "series-books";
+                    enabled: State.signed-in;
+                    clicked => {
+                        State.route = "series";
+                        State.show-series();
                     }
-                    NavItem { text: "Downloads"; icon: Icons.downloads; current: State.route == "downloads"; clicked => { State.route = "downloads"; } }
-                    NavItem {
-                        text: "Stats";
-                        icon: Icons.stats;
-                        current: State.route == "stats";
-                        enabled: State.signed-in;
-                        clicked => {
-                            State.route = "stats";
-                            State.show-stats();
-                        }
+                }
+                NavItem { text: "Downloads"; icon: Icons.downloads; compact: root.compact; current: State.route == "downloads"; clicked => { State.route = "downloads"; } }
+                NavItem {
+                    text: "Stats";
+                    icon: Icons.stats;
+                    compact: root.compact;
+                    current: State.route == "stats";
+                    enabled: State.signed-in;
+                    clicked => {
+                        State.route = "stats";
+                        State.show-stats();
                     }
-                    NavItem { text: "Settings"; icon: Icons.settings; current: State.route == "settings"; clicked => { State.route = "settings"; } }
                 }
                 Rectangle { vertical-stretch: 1; }
-                VerticalLayout {
-                    spacing: 12px;
-                    padding-left: 8px;
-                    padding-right: 8px;
+                if !root.compact: VerticalLayout {
+                    spacing: 8px;
+                    padding: 12px;
                     // found by the check at launch; Settings has the notes and the install button
                     if State.upd-available != "": HorizontalLayout {
                         alignment: start;
-                        Btn { primary: true; small: true; text: "Update to " + State.upd-available; clicked => { State.route = "settings"; } }
-                    }
-                    HorizontalLayout {
-                        alignment: start;
-                        Btn { icon: Icons.theme; text: "Theme: " + (Theme.dark ? "Dark" : "Light"); clicked => { State.toggle-theme(); } }
+                        Btn { small: true; text: "Update to " + State.upd-available; clicked => { State.route = "settings"; } }
                     }
                     if State.offline: Text { text: "Offline: downloaded books still play"; color: Theme.danger; font-size: 12px; wrap: word-wrap; }
                     Muted { text: State.signed-in ? State.signed-in-as : "Not signed in"; font-size: 12px; wrap: word-wrap; }
                 }
+                NavItem { text: "Settings"; icon: Icons.settings; compact: root.compact; current: State.route == "settings"; clicked => { State.route = "settings"; } }
             }
         }
         VerticalLayout {
@@ -144,11 +157,19 @@ export component AppWindow inherits Window {
             if State.message != "": Rectangle {
                 height: msg.preferred-height + 16px;
                 background: Theme.s200;
-                msg := Text { x: 32px; width: parent.width - 64px; text: State.message; color: Theme.ink; wrap: word-wrap; }
+                msg := Text { x: 24px; width: parent.width - 48px; text: State.message; color: Theme.ink; wrap: word-wrap; }
                 Rectangle { y: parent.height - 1px; height: 1px; background: Theme.hairline; }
             }
             Rectangle {
                 vertical-stretch: 1;
+                // the mouse's back button, wherever nothing else takes the press
+                TouchArea {
+                    pointer-event(e) => {
+                        if e.button == PointerEventButton.back && e.kind == PointerEventKind.up && (State.route == "book" || State.route == "player") {
+                            State.route = State.back-route;
+                        }
+                    }
+                }
                 if State.route == "home": HomePage { width: 100%; height: 100%; }
                 if State.route == "library": LibraryPage { width: 100%; height: 100%; }
                 if State.route == "book": BookScreen { width: 100%; height: 100%; }
@@ -158,15 +179,16 @@ export component AppWindow inherits Window {
                 if State.route == "stats": StatsPage { width: 100%; height: 100%; }
                 if State.route == "settings": SettingsPage { width: 100%; height: 100%; server <=> root.server; }
             }
-            if State.has-book && State.route != "player": PlayerBar {
-                open-player => {
-                    if State.route != "player" {
-                        State.back-route = State.route;
-                    }
-                    State.route = "player";
-                }
-            }
         }
+    }
+    if State.has-book && State.route != "player": PlayerBar {
+        open-player => {
+            if State.route != "player" {
+                State.back-route = State.route;
+            }
+            State.route = "player";
+        }
+    }
     }
     }
 }

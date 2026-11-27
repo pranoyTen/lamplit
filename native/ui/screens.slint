@@ -1,46 +1,59 @@
-// Home, Library, one book, and Settings.
+// Home, Library, one book, and Downloads.
 import { ScrollView, LineEdit, ComboBox, Slider } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Icons, Icon, Clickable, Btn, Link, Bar, Card, Cover, H1, H2, Muted, Toggle } from "widgets.slint";
+import { Icons, Icon, Clickable, Btn, Link, Bar, Card, Cover, H1, H2, Muted, Toggle, Toolbar, ToolTitle, Tag, SectionHead } from "widgets.slint";
 import { State, BookCard, DlRow } from "state.slint";
 
-// a cover that plays the book, its title and author that open it, and a progress bar once started
+// a cover that plays the book, its title and author that open it, and a progress bar once started; right-click for the rest
 component BookTile {
     in property <BookCard> book;
     in property <bool> series;
     callback play();
     callback open();
-    VerticalLayout {
-        spacing: 8px;
-        cover := Clickable {
-            label: (root.series ? "Open " : "Play ") + root.book.title;
-            height: self.width;
-            radius: 4px;
-            clicked => { root.play(); }
-            Cover { width: 100%; height: 100%; img: root.book.cover; title: root.book.title; tint: root.book.tint; }
-            Rectangle {
-                border-radius: 4px;
-                background: #00000073;
-                opacity: cover.hover && !root.series ? 1 : 0;
-                animate opacity { duration: 150ms; }
-                Icon {
-                    d: State.playing && State.now-id == root.book.id ? Icons.pause : Icons.play;
-                    size: 40px;
-                    color: white;
-                    fill: State.playing && State.now-id == root.book.id ? transparent : white;
-                    stroke: 2.5px;
+    ContextMenuArea {
+        enabled: !root.series;
+        Menu {
+            MenuItem { title: State.playing && State.now-id == root.book.id ? "Pause" : "Play"; activated => { root.play(); } }
+            MenuItem { title: "Book details"; activated => { root.open(); } }
+            MenuItem { title: "Download"; activated => { State.download(root.book.id); } }
+            MenuItem {
+                title: root.book.progress >= 1 ? "Mark as not finished" : "Mark as finished";
+                activated => { State.set-finished(root.book.id, root.book.progress < 1); }
+            }
+        }
+        VerticalLayout {
+            spacing: 10px;
+            cover := Clickable {
+                label: (root.series ? "Open " : "Play ") + root.book.title;
+                height: self.width;
+                radius: 6px;
+                clicked => { root.play(); }
+                Cover { width: 100%; height: 100%; img: root.book.cover; title: root.book.title; tint: root.book.tint; lifted: cover.hover; }
+                Rectangle {
+                    border-radius: 6px;
+                    background: #00000073;
+                    opacity: cover.hover && !root.series ? 1 : 0;
+                    animate opacity { duration: 150ms; }
+                    Icon {
+                        d: State.playing && State.now-id == root.book.id ? Icons.pause : Icons.play;
+                        size: 40px;
+                        color: white;
+                        fill: State.playing && State.now-id == root.book.id ? transparent : white;
+                        stroke: 2.5px;
+                    }
                 }
             }
-        }
-        Clickable {
-            label: root.book.title;
-            clicked => { root.open(); }
-            VerticalLayout {
-                Text { text: root.book.title; font-weight: 500; overflow: elide; color: Theme.ink; }
-                Muted { text: root.book.meta; font-size: 12px; }
+            Clickable {
+                label: root.book.title;
+                clicked => { root.open(); }
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: root.book.title; font-weight: 600; overflow: elide; color: Theme.ink; }
+                    Muted { text: root.book.meta; font-size: 12px; }
+                }
             }
+            Bar { visible: root.book.progress > 0 && root.book.progress < 1; value: root.book.progress; thick: 3px; }
         }
-        Bar { visible: root.book.progress > 0 && root.book.progress < 1; value: root.book.progress; }
     }
 }
 
@@ -51,16 +64,17 @@ export component BookGrid {
     in property <length> view-top: -1000000px;
     in property <length> view-height: 2000000px;
     callback need(int, int);
-    property <int> cols: max(1, floor((self.width + 16px) / 184px));
-    property <length> cell: (self.width - (self.cols - 1) * 16px) / self.cols;
-    property <length> stride: self.cell + 84px;
+    property <length> gap: 24px;
+    property <int> cols: max(1, floor((self.width + self.gap) / (168px + self.gap)));
+    property <length> cell: (self.width - (self.cols - 1) * self.gap) / self.cols;
+    property <length> stride: self.cell + 92px;
     out property <int> first: max(0, floor(self.view-top / self.stride)) * self.cols;
     out property <int> last: min(self.books.length - 1, ceil((self.view-top + self.view-height) / self.stride) * self.cols + self.cols - 1);
     min-height: ceil(self.books.length / self.cols) * self.stride;
     changed first => { root.need(self.first, self.last); }
     changed last => { root.need(self.first, self.last); }
     for b[i] in root.books: BookTile {
-        x: mod(i, root.cols) * (root.cell + 16px);
+        x: mod(i, root.cols) * (root.cell + root.gap);
         y: floor(i / root.cols) * root.stride;
         width: root.cell;
         book: b;
@@ -74,213 +88,231 @@ export component BookGrid {
     }
 }
 
+// a filter or a choice: an outline, filled with ink when chosen
 export component Pill inherits Clickable {
     in property <string> text;
     in property <bool> on;
     label: text;
-    height: 32px;
+    height: 30px;
     min-width: t.preferred-width + 24px;
-    radius: 16px;
+    radius: 15px;
     accessible-checked: on;
     Rectangle {
-        border-radius: 16px;
+        border-radius: 15px;
         border-width: 1px;
-        border-color: root.on ? Theme.ink : Theme.border-strong;
-        background: root.on ? Theme.ink : (root.hover ? Theme.hover : transparent);
+        border-color: root.on ? Theme.ink : (root.hover ? Theme.border-strong : Theme.hairline);
+        background: root.on ? Theme.ink : transparent;
     }
-    t := Text { text: root.text; color: root.on ? Theme.s100 : Theme.ink; font-weight: 500; }
+    t := Text { text: root.text; color: root.on ? Theme.s100 : Theme.ink; font-weight: 600; font-size: 13px; }
 }
 
-
 export component HomePage {
-    sv := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: sv.visible-width;
-            padding: 32px;
-            spacing: 24px;
-            alignment: start;
-            if State.has-hero: Card {
-                HorizontalLayout {
-                    padding: 24px;
-                    spacing: 24px;
-                    Clickable {
-                        label: "Play " + State.hero.title;
-                        width: clamp((sv.visible-width - 64px) * 0.28, 96px, 184px); // shrinks in a narrow window so the text keeps its room
-                        height: self.width;
-                        clicked => { State.play-book(State.hero.id); }
-                        Cover { width: 100%; height: 100%; img: State.hero.cover; title: State.hero.title; tint: State.hero.tint; }
-                    }
-                    VerticalLayout {
-                        min-width: 0; // long titles wrap instead of widening the page
-                        horizontal-stretch: 1;
-                        spacing: 16px;
-                        alignment: center;
-                        VerticalLayout {
-                            spacing: 4px;
-                            Text { text: "In progress"; color: Theme.accent; font-size: 12px; font-weight: 500; }
-                            H1 { text: State.hero.title; }
-                            Muted { text: State.hero.author; }
+    VerticalLayout {
+        Toolbar { ToolTitle { text: "Home"; } }
+        sv := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: sv.visible-width;
+                padding: 24px;
+                padding-bottom: 40px;
+                spacing: 32px;
+                alignment: start;
+                if State.has-hero: Card {
+                    HorizontalLayout {
+                        padding: 32px;
+                        spacing: 40px;
+                        Clickable {
+                            label: "Play " + State.hero.title;
+                            width: clamp((sv.visible-width - 64px) * 0.26, 120px, 240px); // shrinks in a narrow window so the text keeps its room
+                            height: self.width;
+                            radius: 6px;
+                            clicked => { State.play-book(State.hero.id); }
+                            Cover { width: 100%; height: 100%; img: State.hero.cover; title: State.hero.title; tint: State.hero.tint; title-size: 24px; }
                         }
                         VerticalLayout {
-                            spacing: 8px;
-                            max-width: 520px;
-                            Bar { value: State.hero.progress; thick: 6px; }
+                            min-width: 0; // long titles wrap instead of widening the page
+                            horizontal-stretch: 1;
+                            spacing: 16px;
+                            alignment: center;
+                            HorizontalLayout { alignment: start; Tag { text: "In progress"; } }
+                            VerticalLayout {
+                                spacing: 4px;
+                                H1 { text: State.hero.title; font-size: 34px; }
+                                Text { text: State.hero.author; color: Theme.ink-2; font-size: 16px; }
+                            }
+                            VerticalLayout {
+                                spacing: 8px;
+                                max-width: 520px;
+                                Bar { value: State.hero.progress; thick: 6px; }
+                                HorizontalLayout {
+                                    Muted { text: State.hero-listened; font-size: 12px; horizontal-stretch: 1; }
+                                    Muted { text: State.hero-left; font-size: 12px; }
+                                }
+                            }
                             HorizontalLayout {
-                                Muted { text: State.hero-listened; font-size: 12px; horizontal-stretch: 1; }
-                                Muted { text: State.hero-left; font-size: 12px; }
+                                spacing: 12px;
+                                alignment: start;
+                                Btn {
+                                    primary: true;
+                                    text: State.now-id == State.hero.id ? (State.playing ? "Pause" : "Resume") : "Play";
+                                    clicked => { State.play-book(State.hero.id); }
+                                }
+                                Btn { text: "Book details"; clicked => { State.open-book(State.hero.id); } }
                             }
-                        }
-                        HorizontalLayout {
-                            spacing: 12px;
-                            alignment: start;
-                            Btn {
-                                primary: true;
-                                text: State.now-id == State.hero.id ? (State.playing ? "Pause" : "Resume") : "Play";
-                                clicked => { State.play-book(State.hero.id); }
-                            }
-                            Btn { text: "Book details"; clicked => { State.open-book(State.hero.id); } }
                         }
                     }
                 }
+                if State.continue-books.length > 0: SectionHead { text: "Continue listening"; }
+                if State.continue-books.length > 0: BookGrid { books: State.continue-books; }
+                if State.recent-books.length > 0: SectionHead { text: "Recently added"; }
+                if State.recent-books.length > 0: BookGrid { books: State.recent-books; }
+                if !State.has-hero && State.recent-books.length == 0: Muted { text: State.busy ? "Loading…" : "Nothing here yet"; }
             }
-            if State.continue-books.length > 0: H2 { text: "Continue listening"; }
-            if State.continue-books.length > 0: BookGrid { books: State.continue-books; }
-            if State.recent-books.length > 0: H2 { text: "Recently added"; }
-            if State.recent-books.length > 0: BookGrid { books: State.recent-books; }
-            if !State.has-hero && State.recent-books.length == 0: Muted { text: State.busy ? "Loading…" : "Nothing here yet"; }
         }
     }
 }
 
 export component LibraryPage {
-    sv := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: sv.visible-width;
-            padding: 32px;
-            spacing: 24px;
-            alignment: start;
+    VerticalLayout {
+        // the search box gives up width first, so the toolbar never gets wider than a narrow window
+        Toolbar {
+            ToolTitle { text: "Library"; }
+            Muted { text: State.library-count; font-size: 12px; vertical-alignment: center; }
             VerticalLayout {
-                H1 { text: "Library"; }
-                Muted { text: State.library-count; }
-            }
-            // the search box gives up width first, so the page never gets wider than a narrow window
-            HorizontalLayout {
-                spacing: 12px;
+                alignment: center;
                 LineEdit {
-                    min-width: 140px;
-                    max-width: 320px;
+                    min-width: 120px;
+                    max-width: 260px;
                     horizontal-stretch: 1;
                     placeholder-text: "Search";
                     text <=> State.query;
                     edited => { State.refresh-library(); }
                 }
+            }
+            VerticalLayout {
+                alignment: center;
                 ComboBox {
-                    width: 168px;
+                    width: 150px;
                     model: ["Title", "Author", "Recently added", "Longest"];
                     current-index <=> State.sort;
                     selected => { State.refresh-library(); }
                 }
-                Rectangle { horizontal-stretch: 0.001; }
             }
+            Rectangle { horizontal-stretch: 0.001; }
             HorizontalLayout {
-                spacing: 8px;
-                alignment: start;
-                for f[i] in ["All", "In progress", "Not started", "Finished", "Downloaded"]: Pill {
-                    text: f;
-                    on: State.filter == i;
-                    clicked => {
-                        State.filter = i;
-                        State.refresh-library();
+                spacing: 6px;
+                alignment: end;
+                for f[i] in ["All", "In progress", "Not started", "Finished", "Downloaded"]: VerticalLayout {
+                    alignment: center;
+                    Pill {
+                        text: f;
+                        on: State.filter == i;
+                        clicked => {
+                            State.filter = i;
+                            State.refresh-library();
+                        }
                     }
                 }
             }
-            grid := BookGrid {
-                books: State.library;
-                view-top: -sv.content-y - self.y;
-                view-height: sv.visible-height;
-                need(a, b) => { State.covers-needed("library", a, b); }
+        }
+        sv := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: sv.visible-width;
+                padding: 24px;
+                padding-bottom: 40px;
+                spacing: 24px;
+                alignment: start;
+                grid := BookGrid {
+                    books: State.library;
+                    view-top: -sv.content-y - self.y;
+                    view-height: sv.visible-height;
+                    need(a, b) => { State.covers-needed("library", a, b); }
+                }
+                if State.library.length == 0: Muted { text: State.busy ? "Loading…" : "No books match"; }
             }
-            if State.library.length == 0: Muted { text: State.busy ? "Loading…" : "No books match"; }
         }
     }
 }
 
 export component BookScreen {
-    sv := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: sv.visible-width;
-            padding: 32px;
-            spacing: 24px;
-            alignment: start;
-            HorizontalLayout {
+    VerticalLayout {
+        Toolbar {
+            Link { text: "Back"; icon: Icons.left; y: (parent.height - self.height) / 2; clicked => { State.route = State.back-route; } }
+        }
+        sv := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: sv.visible-width;
+                padding: 32px;
+                spacing: 24px;
                 alignment: start;
-                Link { text: "Back"; icon: Icons.left; clicked => { State.route = State.back-route; } }
-            }
-            if State.book-loading: Muted { text: "Loading…"; }
-            if !State.book-loading: HorizontalLayout {
-                spacing: 32px;
-                alignment: start;
-                VerticalLayout {
+                if State.book-loading: Muted { text: "Loading…"; }
+                if !State.book-loading: HorizontalLayout {
+                    spacing: 40px;
                     alignment: start;
-                    Cover { width: 240px; height: 240px; img: State.book.cover; title: State.book.title; tint: State.book.tint; title-size: 22px; }
-                }
-                VerticalLayout {
-                    spacing: 16px;
-                    max-width: 720px;
-                    horizontal-stretch: 1;
                     VerticalLayout {
-                        spacing: 4px;
-                        H1 { text: State.book.title; }
-                        if State.book.subtitle != "": Muted { text: State.book.subtitle; wrap: word-wrap; }
-                        if State.book.by != "": Muted { text: "by " + State.book.by; wrap: word-wrap; }
-                        if State.book.series != "": Muted { text: State.book.series; wrap: word-wrap; }
-                    }
-                    if State.book.finished: Text { text: "Finished"; color: Theme.accent; font-size: 12px; font-weight: 500; }
-                    if !State.book.finished && State.book.progress > 0: VerticalLayout {
-                        spacing: 4px;
-                        max-width: 360px;
-                        Bar { value: State.book.progress; }
-                        Muted { text: State.book.progress-text; font-size: 12px; }
-                    }
-                    HorizontalLayout {
-                        spacing: 12px;
                         alignment: start;
-                        Btn {
-                            primary: true;
-                            text: State.now-id == State.book.id ? (State.playing ? "Pause" : "Resume") : "Play";
-                            clicked => { State.play-book(State.book.id); }
-                        }
-                        if State.book-dl == "": Btn { text: "Download"; clicked => { State.download(State.book.id); } }
-                        if State.book-dl == "queued" || State.book-dl == "active" || State.book-dl == "error": Muted {
-                            text: State.book-dl-text;
-                            vertical-alignment: center;
-                            color: State.book-dl == "error" ? Theme.danger : Theme.muted;
-                        }
-                        if State.book-dl == "error": Btn { text: "Retry"; clicked => { State.retry-download(State.book.id); } }
-                        if State.book-dl != "": Btn {
-                            text: State.book-dl == "done" ? "Remove download" : "Cancel download";
-                            clicked => { State.remove-download(State.book.id); }
-                        }
-                        Btn {
-                            text: State.book.finished ? "Mark as not finished" : "Mark as finished";
-                            clicked => { State.set-finished(State.book.id, !State.book.finished); }
-                        }
+                        Cover { width: 280px; height: 280px; img: State.book.cover; title: State.book.title; tint: State.book.tint; title-size: 26px; }
                     }
                     VerticalLayout {
-                        spacing: 8px;
-                        for f in State.book.facts: HorizontalLayout {
-                            spacing: 12px;
-                            Muted { text: f.k; width: 96px; }
-                            Text { text: f.v; color: Theme.ink; wrap: word-wrap; horizontal-stretch: 1; }
+                        spacing: 20px;
+                        max-width: 720px;
+                        horizontal-stretch: 1;
+                        VerticalLayout {
+                            spacing: 4px;
+                            H1 { text: State.book.title; font-size: 34px; }
+                            if State.book.subtitle != "": Text { text: State.book.subtitle; color: Theme.ink-2; wrap: word-wrap; }
+                            if State.book.by != "": Text { text: "by " + State.book.by; color: Theme.ink-2; wrap: word-wrap; }
+                            if State.book.series != "": Muted { text: State.book.series; wrap: word-wrap; }
                         }
+                        if State.book.finished: HorizontalLayout { alignment: start; Tag { text: "Finished"; kind: "on"; } }
+                        if !State.book.finished && State.book.progress > 0: VerticalLayout {
+                            spacing: 6px;
+                            max-width: 360px;
+                            Bar { value: State.book.progress; }
+                            Muted { text: State.book.progress-text; font-size: 12px; }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            Btn {
+                                primary: true;
+                                text: State.now-id == State.book.id ? (State.playing ? "Pause" : "Resume") : "Play";
+                                clicked => { State.play-book(State.book.id); }
+                            }
+                            if State.book-dl == "": Btn { text: "Download"; clicked => { State.download(State.book.id); } }
+                            if State.book-dl == "queued" || State.book-dl == "active" || State.book-dl == "error": Muted {
+                                text: State.book-dl-text;
+                                vertical-alignment: center;
+                                color: State.book-dl == "error" ? Theme.danger : Theme.muted;
+                            }
+                            if State.book-dl == "error": Btn { text: "Retry"; clicked => { State.retry-download(State.book.id); } }
+                            if State.book-dl != "": Btn {
+                                text: State.book-dl == "done" ? "Remove download" : "Cancel download";
+                                clicked => { State.remove-download(State.book.id); }
+                            }
+                            Btn {
+                                text: State.book.finished ? "Mark as not finished" : "Mark as finished";
+                                clicked => { State.set-finished(State.book.id, !State.book.finished); }
+                            }
+                        }
+                        // the facts as a ruled list: an ink rule on top, hairlines between
+                        if State.book.facts.length > 0: VerticalLayout {
+                            Rectangle { height: 1px; background: Theme.ink; }
+                            for f in State.book.facts: VerticalLayout {
+                                HorizontalLayout {
+                                    padding-top: 8px;
+                                    padding-bottom: 8px;
+                                    spacing: 16px;
+                                    Text { text: f.k; width: 120px; font-weight: 600; color: Theme.ink; }
+                                    Text { text: f.v; color: Theme.ink-2; wrap: word-wrap; horizontal-stretch: 1; }
+                                }
+                                Rectangle { height: 1px; background: Theme.hairline; }
+                            }
+                        }
+                        if State.book.description != "": Text { text: State.book.description; color: Theme.ink-2; wrap: word-wrap; }
                     }
-                    if State.book.description != "": Text { text: State.book.description; color: Theme.ink; wrap: word-wrap; }
                 }
             }
         }
@@ -290,60 +322,63 @@ export component BookScreen {
 // one downloaded or downloading book: its cover, progress and what can be done with it
 component DownloadRow {
     in property <DlRow> item;
-    HorizontalLayout {
-        padding-top: 12px;
-        padding-bottom: 12px;
-        spacing: 16px;
-        Clickable {
-            label: root.item.title;
-            width: 56px;
-            height: 56px;
-            radius: 4px;
-            clicked => { State.open-book(root.item.id); }
-            Cover { width: 100%; height: 100%; img: root.item.cover; title: ""; tint: root.item.tint; }
+    ContextMenuArea {
+        Menu {
+            MenuItem { title: "Book details"; activated => { State.open-book(root.item.id); } }
+            if root.item.failed: MenuItem { title: "Retry"; activated => { State.retry-download(root.item.id); } }
+            MenuItem { title: root.item.done ? "Remove download" : "Cancel download"; activated => { State.remove-download(root.item.id); } }
         }
-        VerticalLayout {
-            alignment: center;
-            spacing: 4px;
-            horizontal-stretch: 1;
-            min-width: 0;
-            Text { text: root.item.title; font-weight: 500; color: Theme.ink; overflow: elide; }
-            Muted { text: root.item.author; font-size: 12px; }
-            if !root.item.done && !root.item.failed: Bar { value: root.item.progress; }
-            Muted { text: root.item.status; font-size: 12px; color: root.item.failed ? Theme.danger : Theme.muted; wrap: word-wrap; }
-        }
-        if root.item.failed: Btn { small: true; text: "Retry"; y: (parent.height - self.height) / 2; clicked => { State.retry-download(root.item.id); } }
-        Btn {
-            small: true;
-            text: root.item.done ? "Remove" : "Cancel";
-            y: (parent.height - self.height) / 2;
-            clicked => { State.remove-download(root.item.id); }
+        HorizontalLayout {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            spacing: 16px;
+            Clickable {
+                label: root.item.title;
+                width: 52px;
+                height: 52px;
+                radius: 6px;
+                clicked => { State.open-book(root.item.id); }
+                Cover { width: 100%; height: 100%; img: root.item.cover; title: ""; tint: root.item.tint; }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                horizontal-stretch: 1;
+                min-width: 0;
+                Text { text: root.item.title; font-weight: 600; color: Theme.ink; overflow: elide; }
+                Muted { text: root.item.author; font-size: 12px; }
+                if !root.item.done && !root.item.failed: Bar { value: root.item.progress; max-width: 320px; }
+            }
+            Muted { text: root.item.status; font-size: 12px; color: root.item.failed ? Theme.danger : Theme.muted; vertical-alignment: center; max-width: 260px; }
+            if root.item.done: VerticalLayout { alignment: center; Tag { text: "On this computer"; } }
+            if root.item.failed: Btn { small: true; text: "Retry"; y: (parent.height - self.height) / 2; clicked => { State.retry-download(root.item.id); } }
+            Btn {
+                small: true;
+                text: root.item.done ? "Remove" : "Cancel";
+                y: (parent.height - self.height) / 2;
+                clicked => { State.remove-download(root.item.id); }
+            }
         }
     }
 }
 
 export component DownloadsPage {
-    sv := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: sv.visible-width;
-            padding: 32px;
-            spacing: 24px;
-            alignment: start;
+    VerticalLayout {
+        Toolbar {
+            ToolTitle { text: "Downloads"; }
+            Muted { text: State.dl-summary; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+            Btn { small: true; text: State.dl-paused ? "Resume downloads" : "Pause downloads"; y: (parent.height - self.height) / 2; clicked => { State.pause-downloads(!State.dl-paused); } }
+            if State.dl-any-done: Btn { small: true; text: "Remove all downloaded"; y: (parent.height - self.height) / 2; clicked => { State.remove-finished(); } }
+        }
+        sv := ScrollView {
+            vertical-stretch: 1;
             VerticalLayout {
-                H1 { text: "Downloads"; }
-                Muted { text: State.dl-summary; }
-            }
-            HorizontalLayout {
-                spacing: 12px;
+                width: sv.visible-width;
+                padding: 24px;
+                spacing: 0;
                 alignment: start;
-                Btn { small: true; text: State.dl-paused ? "Resume downloads" : "Pause downloads"; clicked => { State.pause-downloads(!State.dl-paused); } }
-                if State.dl-any-done: Btn { small: true; text: "Remove all downloaded"; clicked => { State.remove-finished(); } }
-            }
-            if State.downloads.length == 0: Muted { text: "No downloads yet. Use Download on a book's page to listen without a connection"; wrap: word-wrap; }
-            VerticalLayout {
-                max-width: 840px;
+                if State.downloads.length == 0: Muted { text: "No downloads yet. Use Download on a book's page to listen without a connection"; wrap: word-wrap; }
+                if State.downloads.length > 0: Rectangle { height: 1px; background: Theme.ink; }
                 for d[i] in State.downloads: VerticalLayout {
                     DownloadRow { item: d; }
                     Rectangle { height: 1px; background: Theme.hairline; }

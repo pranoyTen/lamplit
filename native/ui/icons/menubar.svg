@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- the Mac menu bar template: black and alpha only, so macOS can tint it for a light or dark bar -->
+  <path d="M128 24V76" stroke="#000" stroke-width="14" stroke-linecap="round"/>
+  <path d="M96 72H160L196 140H60Z" fill="#000"/>
+  <path d="M68 156H188L212 232H44Z" fill="#000" opacity="0.45"/>
+</svg>
