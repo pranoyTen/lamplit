@@ -1,7 +1,7 @@
 // The bar along the bottom while a book is loaded, and the full player page.
 import { Slider, ComboBox, ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Icons, Icon, Clickable, Btn, IconBtn, Link, Card, Cover, H2, Muted } from "widgets.slint";
+import { Icons, Icon, Clickable, Btn, IconBtn, Link, Card, Cover, H1, H2, Muted, Toolbar, Tag, SectionHead } from "widgets.slint";
 import { Pill } from "screens.slint";
 import { State, ListRow } from "state.slint";
 
@@ -168,24 +168,38 @@ export component PlayerBar {
 component Row inherits Clickable {
     in property <ListRow> item;
     in property <bool> deletable;
+    in property <int> number; // the chapter's number in the timetable; 0 shows none
+    in property <bool> past; // a chapter already listened to
     callback delete();
     label: item.title;
-    height: 48px;
-    Rectangle { background: root.hover ? Theme.hover : transparent; }
-    Rectangle { x: 0; width: 2px; background: root.item.current ? Theme.brand : transparent; }
+    height: 44px;
+    radius: 0;
+    Rectangle { background: root.hover ? Theme.s200 : transparent; }
     HorizontalLayout {
-        padding-left: 16px;
-        padding-right: root.deletable ? 4px : 16px;
+        padding-left: 4px;
+        padding-right: root.deletable ? 0 : 4px;
         spacing: 12px;
+        if root.number > 0: Text {
+            text: root.number;
+            width: 32px;
+            color: Theme.muted;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
         Text {
             text: root.item.title;
-            color: root.item.current ? Theme.ink : Theme.muted;
-            font-weight: root.item.current ? 500 : 400;
+            color: root.item.current ? Theme.ink : root.past ? Theme.muted : Theme.ink-2;
+            font-weight: root.item.current ? 600 : 400;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
         }
-        Muted { text: root.item.sub; font-size: 12px; vertical-alignment: center; }
+        Text { text: root.item.sub; font-size: 12px; color: root.item.current ? Theme.ink : Theme.muted; vertical-alignment: center; }
+        if root.number > 0: HorizontalLayout {
+            width: 72px;
+            alignment: end;
+            if root.item.current: VerticalLayout { alignment: center; Tag { text: State.playing ? "Playing" : "Paused"; } }
+        }
         if root.deletable: IconBtn {
             icon: Icons.close;
             icon-size: 16px;
@@ -198,91 +212,95 @@ component Row inherits Clickable {
 }
 
 export component PlayerPage {
-    HorizontalLayout {
-        padding: 32px;
-        spacing: 32px;
-        VerticalLayout {
-            spacing: 16px;
-            min-width: 360px;
-            max-width: 520px;
-            horizontal-stretch: 1;
-            HorizontalLayout {
-                alignment: start;
-                Link { text: "Collapse player"; icon: Icons.down; clicked => { State.route = State.back-route; } }
-            }
-            HorizontalLayout {
-                alignment: center;
-                Cover { width: 280px; height: 280px; img: State.now-cover; title: State.now-title; tint: State.now-tint; radius: 12px; title-size: 32px; }
-            }
-            VerticalLayout {
-                spacing: 4px;
-                Text { text: State.now-title; font-family: Theme.serif; font-weight: 600; font-size: 26px; color: Theme.ink; wrap: word-wrap; horizontal-alignment: center; }
-                Muted { text: State.now-author; horizontal-alignment: center; }
-                Muted { text: State.chapter-text; horizontal-alignment: center; }
-            }
-            VerticalLayout {
-                spacing: 4px;
-                bar := TouchArea {
-                    height: 20px;
-                    Slider {
-                        width: 100%;
-                        height: 100%;
-                        minimum: State.seek-min;
-                        maximum: max(State.seek-max, State.seek-min + 1);
-                        value <=> State.position;
-                        changed => { State.seeking = true; }
-                        released(v) => {
-                            State.seeking = false;
-                            State.seek(v);
+    VerticalLayout {
+        Toolbar {
+            Link { text: "Collapse player"; icon: Icons.down; y: (parent.height - self.height) / 2; clicked => { State.route = State.back-route; } }
+        }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            padding: 24px;
+            spacing: 48px;
+            // the deck: the book, where you are in the chapter, and everything that changes how it plays
+            Card {
+                min-width: 360px;
+                max-width: 440px;
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+                    HorizontalLayout {
+                        alignment: center;
+                        Cover { width: 240px; height: 240px; img: State.now-cover; title: State.now-title; tint: State.now-tint; title-size: 26px; }
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        H1 { text: State.now-title; font-size: 24px; }
+                        Text { text: State.now-author; color: Theme.ink-2; overflow: elide; }
+                        Muted { text: State.chapter-text; }
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        bar := TouchArea {
+                            height: 20px;
+                            Slider {
+                                width: 100%;
+                                height: 100%;
+                                minimum: State.seek-min;
+                                maximum: max(State.seek-max, State.seek-min + 1);
+                                value <=> State.position;
+                                changed => { State.seeking = true; }
+                                released(v) => {
+                                    State.seeking = false;
+                                    State.seek(v);
+                                }
+                            }
+                            if bar.has-hover: SeekTip { y: -28px; bar-width: bar.width; at: clamp(bar.mouse-x / bar.width, 0, 1); }
+                        }
+                        HorizontalLayout {
+                            Muted { text: State.pos-text; font-size: 12px; horizontal-stretch: 1; }
+                            Muted { text: State.left-text; font-size: 12px; }
                         }
                     }
-                    if bar.has-hover: SeekTip { y: -28px; bar-width: bar.width; at: clamp(bar.mouse-x / bar.width, 0, 1); }
-                }
-                HorizontalLayout {
-                    Muted { text: State.pos-text; font-size: 12px; horizontal-stretch: 1; }
-                    Muted { text: State.left-text; font-size: 12px; }
+                    Controls { big: true; }
+                    VolumeRow { }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: center;
+                        for s in Speeds.all: Pill {
+                            text: s + "×";
+                            on: State.speed == s;
+                            clicked => { State.set-speed(s); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+                        ComboBox {
+                            width: 170px;
+                            model: ["Sleep timer: off", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "End of chapter"];
+                            current-index <=> State.sleep-index;
+                            selected => { State.sleep(State.sleep-index); }
+                        }
+                        if State.sleep-text != "": Btn { text: "+10 min"; small: true; clicked => { State.extend-sleep(); } }
+                        Btn { text: "Add bookmark"; small: true; clicked => { State.add-bookmark(); } }
+                    }
+                    Muted { text: State.sleep-text != "" ? State.sleep-text + ", " + State.book-left : State.book-left; horizontal-alignment: center; font-size: 12px; }
+                    Rectangle { vertical-stretch: 1; }
                 }
             }
-            Controls { big: true; }
-            VolumeRow { }
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: center;
-                for s in Speeds.all: Pill {
-                    text: s + "×";
-                    on: State.speed == s;
-                    clicked => { State.set-speed(s); }
-                }
-            }
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: center;
-                ComboBox {
-                    width: 180px;
-                    model: ["Sleep timer: off", "15 minutes", "30 minutes", "45 minutes", "60 minutes", "End of chapter"];
-                    current-index <=> State.sleep-index;
-                    selected => { State.sleep(State.sleep-index); }
-                }
-                if State.sleep-text != "": Btn { text: "+10 min"; small: true; clicked => { State.extend-sleep(); } }
-                Btn { text: "Add bookmark"; small: true; clicked => { State.add-bookmark(); } }
-            }
-            Muted { text: State.sleep-text != "" ? State.sleep-text + " · " + State.book-left : State.book-left; horizontal-alignment: center; font-size: 12px; }
-            Rectangle { vertical-stretch: 1; }
-        }
-        VerticalLayout {
-            spacing: 24px;
-            min-width: 280px;
-            max-width: 520px;
-            horizontal-stretch: 1;
-            if State.has-chapters: VerticalLayout {
-                spacing: 12px;
-                vertical-stretch: 2;
-                H2 { text: "Chapters"; }
-                Card {
-                    clip: true;
+            // the chapters as a timetable: numbered, each with its start time, the playing one tagged
+            VerticalLayout {
+                spacing: 24px;
+                min-width: 320px;
+                horizontal-stretch: 2;
+                if State.has-chapters: VerticalLayout {
+                    vertical-stretch: 3;
+                    SectionHead { text: "Chapters"; note: State.chapters.length + " chapters"; }
                     list := ListView {
                         for c[i] in State.chapters: Row {
                             item: c;
+                            number: i + 1;
+                            past: i < State.chapter-index;
                             clicked => { State.pick-chapter(i); }
                         }
                     }
@@ -293,19 +311,15 @@ export component PlayerPage {
                         running: !self.done;
                         triggered => {
                             self.done = true;
-                            list.content-y = -clamp(State.chapter-index * 48px - (list.visible-height - 48px) / 2, 0px, max(0px, State.chapters.length * 48px - list.visible-height));
+                            list.content-y = -clamp(State.chapter-index * 44px - (list.visible-height - 44px) / 2, 0px, max(0px, State.chapters.length * 44px - list.visible-height));
                         }
                     }
                 }
-            }
-            VerticalLayout {
-                spacing: 12px;
-                vertical-stretch: 1;
-                H2 { text: "Bookmarks"; }
-                if State.bookmarks.length == 0: Muted { text: "No bookmarks yet"; }
-                if State.bookmarks.length > 0: Card {
-                    clip: true;
-                    ListView {
+                VerticalLayout {
+                    vertical-stretch: 1;
+                    SectionHead { text: "Bookmarks"; }
+                    if State.bookmarks.length == 0: Muted { text: "No bookmarks yet"; height: 44px; vertical-alignment: center; }
+                    if State.bookmarks.length > 0: ListView {
                         for b[i] in State.bookmarks: Row {
                             item: b;
                             deletable: true;

@@ -22,6 +22,7 @@ export global Icons {
     out property <string> downloads: "M12 3v12m0 0-4-4m4 4 4-4M4 20h16";
     out property <string> series: "M5 5h11a2 2 0 0 1 2 2v12H7a2 2 0 0 1-2-2zM9 3h10a2 2 0 0 1 2 2v12";
     out property <string> stats: "M5 20V10M12 20V4M19 20v-7";
+    out property <string> sidebar: "M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 4v16";
 }
 
 export component Icon {
@@ -108,31 +109,71 @@ export component Btn inherits Clickable {
     in property <bool> primary;
     in property <bool> small;
     label: text;
-    height: small ? 36px : 44px;
+    height: small ? 32px : 36px;
+    radius: 8px;
     min-width: row.preferred-width;
     max-width: row.preferred-width; // a button keeps its natural width in a row
     opacity: self.enabled ? 1 : 0.45;
+    // the filled one is ink on paper; the rest sit on the well colour with a hairline
     Rectangle {
         border-radius: 8px;
         border-width: 1px;
-        border-color: primary ? Theme.brand : Theme.border-strong;
-        background: primary ? Theme.brand : (root.hover && root.enabled ? Theme.hover : transparent);
+        border-color: primary ? Theme.ink : (root.hover && root.enabled ? Theme.border-strong : Theme.hairline);
+        background: primary ? (root.hover && root.enabled ? Theme.ink-2 : Theme.ink) : (root.hover && root.enabled ? Theme.s300 : Theme.s200);
     }
     row := HorizontalLayout {
-        padding-left: small ? 12px : 20px;
+        padding-left: small ? 12px : 16px;
         padding-right: self.padding-left;
         spacing: 8px;
         alignment: center;
         if root.icon != "": VerticalLayout {
             alignment: center;
-            Icon { d: root.icon; color: root.primary ? Theme.on-brand : Theme.ink; }
+            Icon { d: root.icon; size: 16px; color: root.primary ? Theme.s100 : Theme.ink; }
         }
         Text {
             text: root.text;
-            color: root.primary ? Theme.on-brand : Theme.ink;
-            font-weight: 500;
+            color: root.primary ? Theme.s100 : Theme.ink;
+            font-weight: 600;
             vertical-alignment: center;
         }
+    }
+}
+
+// the bar along the top of each screen: its name, then its tools; it stays put while the screen scrolls
+export component Toolbar inherits Rectangle {
+    height: 52px;
+    background: Theme.s100;
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 16px;
+        @children
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.hairline; }
+}
+
+export component ToolTitle inherits Text {
+    font-size: 16px;
+    font-weight: 700;
+    color: Theme.ink;
+    vertical-alignment: center;
+}
+
+// a small state pill: in (teal: playing, in progress), on (ink: finished) or out (an outline)
+export component Tag inherits Rectangle {
+    in property <string> text;
+    in property <string> kind: "in";
+    height: 22px;
+    width: t.preferred-width + 16px;
+    border-radius: 11px;
+    background: kind == "in" ? Theme.accent-soft : kind == "on" ? Theme.ink : transparent;
+    border-width: kind == "out" ? 1px : 0;
+    border-color: Theme.hairline;
+    t := Text {
+        text: root.text;
+        font-size: 12px;
+        font-weight: 600;
+        color: root.kind == "in" ? Theme.accent-soft-ink : root.kind == "on" ? Theme.s100 : Theme.muted;
     }
 }
 
@@ -141,15 +182,18 @@ export component IconBtn inherits Clickable {
     in property <string> icon;
     in property <bool> main;
     in property <bool> filled;
-    in property <length> icon-size: 24px;
+    in property <length> icon-size: 20px;
     in property <string> caption; // a small number drawn inside, for the skip buttons
-    width: main ? 52px : 44px;
+    width: main ? 48px : 36px;
     height: self.width;
     radius: main || Theme.mac ? self.width / 2 : 8px;
     opacity: self.enabled ? 1 : 0.45;
     Rectangle {
         border-radius: root.radius;
-        background: root.main ? Theme.main : (root.hover && root.enabled ? Theme.hover : transparent);
+        background: root.main ? (root.hover && root.enabled && !Theme.mac ? Theme.ink-2 : Theme.main) : (root.hover && root.enabled ? Theme.hover : transparent);
+        drop-shadow-blur: root.main && !Theme.mac ? 12px : 0;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: Theme.shadow;
     }
     Icon {
         d: root.icon;
@@ -207,41 +251,50 @@ export component Bar {
     }
 }
 
+// a well: the second paper colour with a hairline edge, a step up from the page
 export component Card inherits Rectangle {
-    background: Theme.raised;
+    background: Theme.s200;
     border-width: 1px;
     border-color: Theme.hairline;
-    border-radius: 12px;
-    drop-shadow-blur: 2px;
+    border-radius: 14px;
+    drop-shadow-blur: 3px;
     drop-shadow-offset-y: 1px;
-    drop-shadow-color: Theme.dark ? #00000080 : #0000001a;
+    drop-shadow-color: Theme.dark ? #00000066 : #0000000f;
 }
 
-// a square cover: the title in serif on a colour drawn from it, under the real cover once it has loaded
+// a cover drawn as a book: a darker spine down the left edge, light falling from the top left, a shadow underneath. The title shows
+// on the book's colour until the real cover has loaded.
 export component Cover {
     in property <image> img;
     in property <string> title;
-    in property <color> tint: #4a3f35;
-    in property <length> title-size: 18px;
-    in property <length> radius: 4px;
+    in property <color> tint: #3d4652;
+    in property <length> title-size: 16px;
+    in property <length> radius: 6px;
+    in property <bool> lifted; // the pointer is on it
     Rectangle {
-        border-radius: root.radius;
-        drop-shadow-blur: 2px;
-        drop-shadow-offset-y: 1px;
-        drop-shadow-color: #0000001a;
+        border-top-left-radius: 3px;
+        border-bottom-left-radius: 3px;
+        border-top-right-radius: root.radius;
+        border-bottom-right-radius: root.radius;
         background: root.tint;
+        drop-shadow-blur: root.width < 64px ? 4px : (root.lifted ? 26px : 16px);
+        drop-shadow-offset-y: root.width < 64px ? 1px : (root.lifted ? 12px : 6px);
+        drop-shadow-color: Theme.shadow;
+        animate drop-shadow-blur, drop-shadow-offset-y { duration: 180ms; easing: ease-out; }
     }
     Rectangle {
-        border-radius: root.radius;
+        border-top-left-radius: 3px;
+        border-bottom-left-radius: 3px;
+        border-top-right-radius: root.radius;
+        border-bottom-right-radius: root.radius;
         clip: true;
         Text {
-            x: 16px;
-            width: parent.width - 32px;
-            y: parent.height - self.height - 16px;
+            x: parent.width * 0.14;
+            y: parent.width * 0.1;
+            width: parent.width * 0.78;
             text: root.title;
             color: Theme.cover-text;
-            font-family: Theme.serif;
-            font-weight: 600;
+            font-weight: 700;
             font-size: root.title-size;
             wrap: word-wrap;
             overflow: elide;
@@ -252,21 +305,25 @@ export component Cover {
             source: root.img;
             image-fit: cover;
         }
+        // the light, then the spine and the crease beside it
+        Rectangle { background: @linear-gradient(160deg, #ffffff26 0%, #ffffff00 45%, #00000033 100%); }
+        Rectangle { x: 0; width: max(2px, parent.width * 0.035); background: #00000059; }
+        Rectangle { x: max(2px, parent.width * 0.035); width: max(1px, parent.width * 0.01); background: #ffffff2e; }
     }
 }
 
+// the big title on a book's page, the home screen and the player
 export component H1 inherits Text {
-    font-family: Theme.serif;
-    font-weight: 600;
-    font-size: 32px;
+    font-weight: 700;
+    font-size: 30px;
+    letter-spacing: -0.5px;
     color: Theme.ink;
     wrap: word-wrap;
 }
 
 export component H2 inherits Text {
-    font-family: Theme.serif;
-    font-weight: 600;
-    font-size: 22px;
+    font-weight: 700;
+    font-size: 17px;
     color: Theme.ink;
 }
 
@@ -290,7 +347,9 @@ export component Toggle inherits Clickable {
     }
     Rectangle {
         border-radius: 12px;
-        background: root.checked ? Theme.brand : Theme.track;
+        background: root.checked ? Theme.ink : Theme.s300;
+        border-width: root.checked ? 0 : 1px;
+        border-color: Theme.hairline;
         animate background { duration: 120ms; }
         Rectangle {
             width: 18px;
@@ -299,7 +358,22 @@ export component Toggle inherits Clickable {
             y: 3px;
             x: root.checked ? parent.width - self.width - 3px : 3px;
             animate x { duration: 120ms; }
-            background: root.checked ? Theme.on-brand : Theme.raised;
+            background: root.checked ? Theme.s100 : Theme.muted;
         }
+    }
+}
+
+// a section's heading over an ink rule, like a list in a printed catalogue
+export component SectionHead {
+    in property <string> text;
+    in property <string> note;
+    VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 12px;
+            H2 { text: root.text; horizontal-stretch: 1; }
+            if root.note != "": Muted { text: root.note; font-size: 12px; vertical-alignment: bottom; }
+        }
+        Rectangle { height: 1px; background: Theme.ink; }
     }
 }

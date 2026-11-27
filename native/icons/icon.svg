@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Lamplit: a pendant lamp in Night. The source of every icon in this folder and ui/icons/tray.png -->
+  <defs><clipPath id="tile"><rect width="256" height="256" rx="56"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="256" height="256" fill="#172b49"/>
+    <path d="M60 140H196L224 256H32Z" fill="#fac053" opacity="0.55"/>
+    <path d="M128 24V76" stroke="#fcf5e3" stroke-width="10" stroke-linecap="round"/>
+    <path d="M96 72H160L196 140H60Z" fill="#fcf5e3"/>
+    <circle cx="128" cy="146" r="14" fill="#fcf5e3"/>
+  </g>
+</svg>

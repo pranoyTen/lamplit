@@ -1,7 +1,7 @@
 // Settings, laid out like the Tauri app's page: sections of labelled rows in cards, divided by hairlines.
 import { ScrollView, LineEdit, ComboBox, Slider } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Clickable, Btn, Card, H1, H2, Muted, Toggle } from "widgets.slint";
+import { Clickable, Btn, Card, H1, H2, Muted, Toggle, Toolbar, ToolTitle, SectionHead } from "widgets.slint";
 import { State } from "state.slint";
 
 // one setting: its name and a line about it on the left, the control on the right; a hairline above all but the first
@@ -61,16 +61,21 @@ component Kbd inherits Rectangle {
 component Section {
     in property <string> title;
     VerticalLayout {
-        spacing: 12px;
-        H2 { text: root.title; }
-        Card {
-            VerticalLayout {
-                padding-left: 24px;
-                padding-right: 24px;
-                @children
-            }
-        }
+        spacing: 4px;
+        SectionHead { text: root.title; }
+        VerticalLayout { @children }
     }
+}
+
+// one category in the list down the left; choosing it shows only that pane
+component PaneItem inherits Clickable {
+    in property <string> text;
+    in property <bool> current;
+    label: text;
+    height: 32px;
+    accessible-item-selected: current;
+    Rectangle { border-radius: 8px; background: root.current || root.hover ? Theme.s300 : transparent; }
+    Text { x: 12px; text: root.text; color: root.current ? Theme.ink : Theme.ink-2; font-weight: root.current ? 600 : 400; }
 }
 
 export component SettingsPage {
@@ -78,20 +83,37 @@ export component SettingsPage {
     property <string> user;
     property <string> pass;
     property <bool> show-pw;
+    property <int> pane;
+    VerticalLayout {
+    Toolbar { ToolTitle { text: "Settings"; } }
+    HorizontalLayout {
+        vertical-stretch: 1;
+        VerticalLayout {
+            width: 220px;
+            padding: 16px;
+            spacing: 2px;
+            alignment: start;
+            for s[i] in ["Server connection", "Libraries", "Playback", "Equalizer", "Sync and downloads", "Appearance", "Updates", "Keyboard shortcuts"]: PaneItem {
+                text: s;
+                current: root.pane == i;
+                // Libraries only once signed in
+                height: i == 1 && !(State.signed-in && State.libraries.length > 0) ? 0 : 32px;
+                visible: self.height > 0;
+                clicked => { root.pane = i; }
+            }
+        }
+        Rectangle { width: 1px; background: Theme.hairline; }
     sv := ScrollView {
-        width: 100%;
-        height: 100%;
+        horizontal-stretch: 1;
         VerticalLayout {
             width: sv.visible-width;
             padding: 32px;
-            spacing: 24px;
             alignment: start;
-            H1 { text: "Settings"; }
             VerticalLayout {
                 spacing: 32px;
-                max-width: 800px;
+                max-width: 760px;
 
-                Section {
+                if root.pane == 0: Section {
                     title: "Server connection";
                     if State.signed-in: HorizontalLayout {
                         padding-top: 16px;
@@ -104,7 +126,7 @@ export component SettingsPage {
                             background: Theme.s200;
                             border-width: 1px;
                             border-color: Theme.hairline;
-                            Text { text: State.user-initial; font-family: Theme.serif; font-weight: 600; font-size: 22px; color: Theme.ink; }
+                            Text { text: State.user-initial; font-weight: 700; font-size: 20px; color: Theme.ink; }
                         }
                         VerticalLayout {
                             alignment: center;
@@ -169,7 +191,7 @@ export component SettingsPage {
                     }
                 }
 
-                if State.signed-in && State.libraries.length > 0: Section {
+                if root.pane == 1 && State.signed-in && State.libraries.length > 0: Section {
                     title: "Libraries";
                     for l[i] in State.libraries: SetRow {
                         first: i == 0;
@@ -179,7 +201,7 @@ export component SettingsPage {
                     }
                 }
 
-                Section {
+                if root.pane == 2: Section {
                     title: "Playback";
                     SetRow {
                         first: true;
@@ -247,12 +269,11 @@ export component SettingsPage {
                     }
                 }
 
-                VerticalLayout {
-                    spacing: 12px;
-                    H2 { text: "Equalizer"; }
-                    Card {
+                if root.pane == 3: Section {
+                    title: "Equalizer";
+                    VerticalLayout {
                         VerticalLayout {
-                            padding: 16px;
+                            padding-top: 16px;
                             spacing: 8px;
                             ComboBox {
                                 model: ["Flat", "Voice", "Less bass", "More bass", "Treble", "Custom"];
@@ -284,7 +305,7 @@ export component SettingsPage {
                     }
                 }
 
-                Section {
+                if root.pane == 4: Section {
                     title: "Sync and downloads";
                     SetRow {
                         first: true;
@@ -323,7 +344,7 @@ export component SettingsPage {
                     }
                 }
 
-                Section {
+                if root.pane == 5: Section {
                     title: "Appearance";
                     SetRow {
                         first: true;
@@ -337,7 +358,7 @@ export component SettingsPage {
                     }
                 }
 
-                Section {
+                if root.pane == 6: Section {
                     title: "Updates";
                     SetRow {
                         first: true;
@@ -348,7 +369,7 @@ export component SettingsPage {
                     }
                 }
 
-                Section {
+                if root.pane == 7: Section {
                     title: "Keyboard shortcuts";
                     SetRow {
                         first: true;
@@ -366,5 +387,7 @@ export component SettingsPage {
                 }
             }
         }
+    }
+    }
     }
 }
