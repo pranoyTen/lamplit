@@ -31,6 +31,39 @@ export global Theme {
     out property <color> hover: mac ? (dark ? #ffffff1f : #00000012) : s300;
     out property <color> cover-text: #f8f5ee;
     out property <color> shadow: dark ? #000000cc : #00000040;
+    // the close button under the mouse: the system's own red, the same in light and dark
+    out property <color> close: #c42b1c;
+    out property <color> on-close: #ffffff;
+}
+
+// the title bar Lamplit draws itself on Windows (src/frame.rs): every toolbar moves the window, the buttons sit top right
+export global Frame {
+    in-out property <bool> custom;
+    in-out property <bool> maximized;
+    out property <length> buttons-width: custom ? 3 * 46px : 0;
+    callback drag();
+    callback minimize();
+    callback toggle-maximized();
+    callback close();
+}
+
+// an empty part of a toolbar: dragging moves the window, a double click maximises or restores it, like a title bar
+export component DragArea inherits TouchArea {
+    property <bool> dragged;
+    enabled: Frame.custom;
+    pointer-event(e) => {
+        if e.kind == PointerEventKind.down {
+            self.dragged = false;
+        }
+    }
+    // only once the mouse moves, so a double click still arrives; Windows then takes the button up, so this waits for the next press
+    moved => {
+        if self.pressed && !self.dragged {
+            self.dragged = true;
+            Frame.drag();
+        }
+    }
+    double-clicked => { Frame.toggle-maximized(); }
 }
 
 // keeps the standard widgets (text fields, menus, scroll bars) in the same light or dark scheme

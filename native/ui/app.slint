@@ -1,5 +1,5 @@
 // The main window: the sidebar, the current screen under its toolbar, and the player bar along the bottom.
-import { Theme, ThemeSync } from "theme.slint";
+import { Theme, ThemeSync, Frame, DragArea } from "theme.slint";
 import { Icons, Icon, Clickable, Btn, Muted } from "widgets.slint";
 import { State, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, LibRow } from "state.slint";
 import { HomePage, LibraryPage, BookScreen, DownloadsPage } from "screens.slint";
@@ -8,7 +8,7 @@ import { SeriesPage, StatsPage } from "pages.slint";
 import { PlayerBar, PlayerPage } from "player.slint";
 import { MiniPlayer } from "mini.slint";
 
-export { State, Theme, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, MiniPlayer, LibRow }
+export { State, Theme, Frame, BookCard, BookPage, Fact, ListRow, DlRow, Tile, BarItem, Recent, MiniPlayer, LibRow }
 
 // one destination in the sidebar: its icon, and its name unless the sidebar is collapsed
 component NavItem inherits Clickable {
@@ -38,6 +38,32 @@ component NavItem inherits Clickable {
             color: root.current ? Theme.ink : Theme.ink-2;
             font-weight: root.current ? 600 : 400;
         }
+    }
+}
+
+// minimise, maximise or restore, and close, as Windows draws them: 46 px wide, a 10 px glyph, the close one red under the mouse
+component CaptionBtn inherits TouchArea {
+    in property <string> d;
+    in property <string> label;
+    in property <bool> close;
+    width: 46px;
+    height: 51px; // the toolbar's rule stays under it
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { root.clicked(); }
+    Rectangle {
+        background: root.close && (root.has-hover || root.pressed) ? (root.pressed ? Theme.close.with-alpha(0.85) : Theme.close)
+            : root.pressed ? Theme.hairline : root.has-hover ? Theme.s300 : transparent;
+    }
+    Path {
+        width: 10px;
+        height: 10px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        commands: root.d;
+        fill: transparent;
+        stroke: root.close && (root.has-hover || root.pressed) ? Theme.on-close : Theme.ink;
+        stroke-width: 1px;
     }
 }
 
@@ -97,12 +123,28 @@ export component AppWindow inherits Window {
             Rectangle { x: parent.width - 1px; width: 1px; background: Theme.hairline; }
             VerticalLayout {
                 padding: 12px;
+                padding-top: 0;
                 padding-left: 8px;
                 padding-right: 9px;
                 spacing: 2px;
-                HorizontalLayout {
-                    alignment: root.compact ? center : start;
-                    padding-bottom: 8px;
+                // as tall as the toolbars, so the two read as one title bar
+                Rectangle {
+                    height: 52px;
+                    DragArea {}
+                    HorizontalLayout {
+                        alignment: root.compact ? center : space-between;
+                        padding-bottom: 0;
+                        if !root.compact: HorizontalLayout {
+                            padding-left: 10px;
+                            spacing: 10px;
+                            VerticalLayout {
+                                alignment: center;
+                                Image { source: @image-url("icons/tray.png"); width: 18px; height: 18px; accessible-role: none; }
+                            }
+                            Text { text: "Lamplit"; font-weight: 700; font-size: 14px; color: Theme.ink; vertical-alignment: center; }
+                        }
+                        VerticalLayout {
+                        alignment: center;
                     Clickable {
                         label: root.collapsed ? "Expand the sidebar" : "Collapse the sidebar";
                         width: 36px;
@@ -111,7 +153,10 @@ export component AppWindow inherits Window {
                         Rectangle { border-radius: 8px; background: parent.hover ? Theme.s300 : transparent; }
                         Icon { d: Icons.sidebar; size: 18px; color: Theme.muted; }
                     }
+                        }
+                    }
                 }
+                Rectangle { height: 4px; }
                 NavItem { text: "Home"; icon: Icons.home; compact: root.compact; current: State.route == "home"; enabled: State.signed-in; clicked => { State.route = "home"; } }
                 NavItem { text: "Library"; icon: Icons.library; compact: root.compact; current: State.route == "library"; enabled: State.signed-in; clicked => { State.route = "library"; } }
                 NavItem {
@@ -154,12 +199,6 @@ export component AppWindow inherits Window {
         }
         VerticalLayout {
             horizontal-stretch: 1;
-            if State.message != "": Rectangle {
-                height: msg.preferred-height + 16px;
-                background: Theme.s200;
-                msg := Text { x: 24px; width: parent.width - 48px; text: State.message; color: Theme.ink; wrap: word-wrap; }
-                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.hairline; }
-            }
             Rectangle {
                 vertical-stretch: 1;
                 // the mouse's back button, wherever nothing else takes the press
@@ -178,6 +217,26 @@ export component AppWindow inherits Window {
                 if State.route == "series" || State.route == "series-books": SeriesPage { width: 100%; height: 100%; }
                 if State.route == "stats": StatsPage { width: 100%; height: 100%; }
                 if State.route == "settings": SettingsPage { width: 100%; height: 100%; server <=> root.server; }
+                if Frame.custom: HorizontalLayout {
+                    width: Frame.buttons-width;
+                    height: 51px;
+                    x: parent.width - self.width;
+                    y: 0;
+                    CaptionBtn { label: "Minimise"; d: "M 0 5.5 L 10 5.5"; clicked => { Frame.minimize(); } }
+                    CaptionBtn {
+                        label: Frame.maximized ? "Restore" : "Maximise";
+                        d: Frame.maximized ? "M 2.5 2.5 V 0.5 H 9.5 V 7.5 H 7.5 M 0.5 2.5 H 7.5 V 9.5 H 0.5 Z" : "M 0.5 0.5 H 9.5 V 9.5 H 0.5 Z";
+                        clicked => { Frame.toggle-maximized(); }
+                    }
+                    CaptionBtn { label: "Close"; close: true; d: "M 0 0 L 10 10 M 10 0 L 0 10"; clicked => { Frame.close(); } }
+                }
+            }
+            // messages sit under the screen, so the top row stays free to move the window
+            if State.message != "": Rectangle {
+                height: msg.preferred-height + 16px;
+                background: Theme.s200;
+                msg := Text { x: 24px; width: parent.width - 48px; text: State.message; color: Theme.ink; wrap: word-wrap; }
+                Rectangle { y: 0; height: 1px; background: Theme.hairline; }
             }
         }
     }

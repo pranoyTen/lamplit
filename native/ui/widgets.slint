@@ -1,5 +1,5 @@
 // Small building blocks shared by every screen.
-import { Theme } from "theme.slint";
+import { Theme, Frame, DragArea } from "theme.slint";
 
 // the line icons from the Tauri app, as SVG path data on a 24 × 24 grid
 export global Icons {
@@ -143,9 +143,10 @@ export component Btn inherits Clickable {
 export component Toolbar inherits Rectangle {
     height: 52px;
     background: Theme.s100;
+    DragArea {}
     HorizontalLayout {
         padding-left: 24px;
-        padding-right: 24px;
+        padding-right: 24px + (Frame.custom ? Frame.buttons-width - 12px : 0);
         spacing: 16px;
         @children
     }
