@@ -6,6 +6,7 @@ mod book;
 mod covers;
 mod downloads;
 mod eq;
+mod frame;
 mod http_source;
 mod instance;
 mod library;
@@ -1411,6 +1412,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let theme = ui.global::<Theme>();
     theme.set_dark(prefs.dark);
+    let fr = ui.global::<Frame>();
+    let cmd = |c| move || {
+        if let Some(ui) = window() {
+            frame::command(ui.window(), c)
+        }
+    };
+    fr.on_minimize(cmd(frame::Command::Minimize));
+    fr.on_toggle_maximized(cmd(frame::Command::ToggleMaximized));
+    fr.on_close(cmd(frame::Command::Close));
+    fr.on_drag(|| {
+        if let Some(ui) = window() {
+            frame::drag(ui.window())
+        }
+    });
     if !cfg!(windows) {
         theme.set_sans("".into()); // the system font
     }
@@ -1713,6 +1728,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             taskbar::Button::Toggle => toggle(),
             taskbar::Button::Forward => skip(with_app(|a| a.prefs.fwd as f64)),
         });
+        let custom = frame::register(ui.window(), |max| {
+            if let Some(ui) = window() {
+                ui.global::<Frame>().set_maximized(max)
+            }
+        });
+        ui.global::<Frame>().set_custom(custom);
     });
     slint::run_event_loop_until_quit()?;
     instance::release(); // the rest can take a moment, and opening Lamplit again meanwhile should work

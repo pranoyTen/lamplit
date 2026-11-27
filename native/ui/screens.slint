@@ -199,18 +199,22 @@ export component LibraryPage {
                 }
             }
             Rectangle { horizontal-stretch: 0.001; }
-            HorizontalLayout {
-                spacing: 6px;
-                alignment: end;
-                for f[i] in ["All", "In progress", "Not started", "Finished", "Downloaded"]: VerticalLayout {
-                    alignment: center;
-                    Pill {
-                        text: f;
-                        on: State.filter == i;
-                        clicked => {
-                            State.filter = i;
-                            State.refresh-library();
-                        }
+        }
+        // the filters get their own row: the toolbar also holds the window buttons on Windows
+        HorizontalLayout {
+            padding-left: 24px;
+            padding-right: 24px;
+            padding-top: 16px;
+            spacing: 6px;
+            alignment: start;
+            for f[i] in ["All", "In progress", "Not started", "Finished", "Downloaded"]: VerticalLayout {
+                alignment: center;
+                Pill {
+                    text: f;
+                    on: State.filter == i;
+                    clicked => {
+                        State.filter = i;
+                        State.refresh-library();
                     }
                 }
             }
